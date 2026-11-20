@@ -1,0 +1,20 @@
+[package]
+name = "busmanager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.16"
+osmpbfreader = "0.19"
+petgraph = "0.6"
+
+# Faster iteration in debug builds
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
