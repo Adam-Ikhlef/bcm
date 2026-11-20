@@ -3,30 +3,38 @@
 A City Bus Manager-style game built with Rust + Bevy, running on **real OpenStreetMap data**.
 Targets Windows, macOS and Ubuntu.
 
-## Get a map
-
-1. Download an `.osm.pbf` extract of a city (small extracts load fastest):
-   - https://extract.bbbike.org (pick any city, choose "Protocolbuffer (PBF)")
-   - https://download.geofabrik.de (country/region extracts, large)
-2. Save it as `assets/map.osm.pbf` (or pass a path as the first argument).
-
 ## Run
 
 ```bash
 cargo run --release
-# or
-cargo run --release -- path/to/city.osm.pbf
 ```
 
-## Controls
+In the menu, type a city name, press Enter, pick the right result (Up/Down + Enter).
+The game downloads the road network and bus stops from OpenStreetMap (Nominatim + Overpass API)
+and starts. Downloads are cached in `cache/`, so the same city loads instantly next time.
+No `.pbf` files and no recompiling needed.
+
+Optional: skip the menu with a local extract: `cargo run --release -- path/to/city.osm.pbf`
+
+> Big cities (millions of people) download a lot of data and take longer. Start with a mid-size
+> city or town. Only cities that exist as an administrative area in OpenStreetMap are listed.
+
+## How to play
 
 | Input | Action |
 |---|---|
 | WASD / arrows | Pan |
 | Mouse wheel | Zoom |
 | Left click | Add the nearest bus stop to the line you are drawing |
-| Enter | Finish the line (needs 2+ stops); 3 buses start driving the loop |
+| Enter | Open the line (needs 2+ stops, costs 3 buses) |
+| B | Buy one more bus for the latest line |
 | Esc | Cancel the line being drawn |
+| 1 / 2 / 3 | Game speed x1 / x4 / x10 |
+| Space | Pause |
+
+Passengers appear at stops (busier areas, judged by road density, generate more). Stops grow and
+turn red as people wait. Buses pick them up, you earn fares, buses cost money to buy and run.
+Connect busy stops with efficient loops to stay profitable.
 
 ## Linux build dependencies
 
@@ -37,8 +45,7 @@ sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-d
 ## Roadmap
 
 - [ ] Bake roads into a mesh instead of per-frame gizmos (big cities)
-- [ ] Spatial index for stop snapping
-- [ ] Timetables, bus capacity, passengers per stop (use residential/POI density)
-- [ ] Money, fleet purchases, line profitability
-- [ ] Save/load, city chooser, UI
-- [ ] Bus stops from `public_transport=platform` and bus route relations
+- [ ] Real demand from buildings/POIs and passenger destinations
+- [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
+- [ ] Per-line profit stats, bus upgrades, loans
+- [ ] Save/load, in-game city chooser improvements, proper UI
