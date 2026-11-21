@@ -35,7 +35,7 @@ fn cache_dir() -> PathBuf {
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .user_agent("busmanager/0.2 (open-source hobby game)")
-        .timeout(Duration::from_secs(240))
+        .timeout(Duration::from_secs(300))
         .build()
 }
 
@@ -59,7 +59,7 @@ pub fn search_places(query: &str) -> Result<Vec<Place>, String> {
 }
 
 fn data_path(place: &Place) -> PathBuf {
-    cache_dir().join(format!("city_{}.json", place.osm_id))
+    cache_dir().join(format!("city_{}_v2.json", place.osm_id))
 }
 
 fn meta_path(place: &Place) -> PathBuf {
@@ -103,9 +103,17 @@ pub fn cached_cities() -> Vec<Place> {
 
 fn overpass_query(area_id: i64) -> String {
     format!(
-        "[out:json][timeout:180];\
+        "[out:json][timeout:240];\
          area(id:{area_id})->.a;\
-         (way[\"highway\"~\"^({})$\"](area.a);node[\"highway\"=\"bus_stop\"](area.a););\
+         (\
+         way[\"highway\"~\"^({})$\"](area.a);\
+         node[\"highway\"=\"bus_stop\"](area.a);\
+         way[\"building\"](area.a);\
+         way[\"natural\"~\"^(water|wood|scrub|grassland)$\"](area.a);\
+         way[\"waterway\"=\"riverbank\"](area.a);\
+         way[\"leisure\"~\"^(park|garden|playground|recreation_ground|nature_reserve)$\"](area.a);\
+         way[\"landuse\"~\"^(grass|forest|meadow|recreation_ground|village_green|cemetery|reservoir|basin)$\"](area.a);\
+         );\
          out body;>;out skel qt;",
         osm::DRIVABLE.join("|")
     )

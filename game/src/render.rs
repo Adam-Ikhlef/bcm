@@ -10,7 +10,7 @@ use bevy::{
 };
 
 use crate::{
-    osm::{MapData, Road, RoadClass},
+    osm::{AreaKind, MapData, Road, RoadClass},
     style, Bus, Draft, GameWorld, Lines, StopQueues, MAX_WAITING,
 };
 
@@ -224,6 +224,81 @@ pub fn update_roads(
         meshes.insert(layer.casing.id(), build_ribbon(&map.roads, &layer.roads, casing_w));
         layer.built_level = Some(level);
         rebuilt = true;
+    }
+}
+
+// --- Filled areas (water, parks, buildings) -------------------------------------
+
+#[derive(Component)]
+pub struct BuildingLayer;
+
+fn area_color(kind: AreaKind) -> Color {
+    match kind {
+        AreaKind::Water => style::rgb(0xa8, 0xd3, 0xe6),
+        AreaKind::Park => style::rgb(0xa9, 0xd8, 0x8f),
+        AreaKind::Building => style::rgb(0xa6, 0xb2, 0xc4),
+    }
+}
+
+fn area_z(kind: AreaKind) -> f32 {
+    match kind {
+        AreaKind::Water => -8.0,
+        AreaKind::Park => -7.0,
+        AreaKind::Building => -6.0,
+    }
+}
+
+/// Triangulates all polygons of one kind into a single mesh (ear clipping).
+fn build_area_mesh(map: &MapData, kind: AreaKind) -> Mesh {
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for area in map.areas.iter().filter(|a| a.kind == kind) {
+        let flat: Vec<f64> = area.pts.iter().flat_map(|p| [p.x as f64, p.y as f64]).collect();
+        let Ok(tris) = earcutr::earcut(&flat, &[], 2) else {
+            continue;
+        };
+        let base = positions.len() as u32;
+        positions.extend(area.pts.iter().map(|p| [p.x, p.y, 0.0]));
+        indices.extend(tris.into_iter().map(|i| base + i as u32));
+    }
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+pub fn spawn_areas(
+    mut commands: Commands,
+    map: Res<MapData>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    for kind in [AreaKind::Water, AreaKind::Park, AreaKind::Building] {
+        if !map.areas.iter().any(|a| a.kind == kind) {
+            continue;
+        }
+        let mut e = commands.spawn((
+            Mesh2d(meshes.add(build_area_mesh(&map, kind))),
+            MeshMaterial2d(materials.add(ColorMaterial::from(area_color(kind)))),
+            Transform::from_xyz(0.0, 0.0, area_z(kind)),
+            GameWorld,
+        ));
+        if kind == AreaKind::Building {
+            e.insert(BuildingLayer);
+        }
+    }
+}
+
+/// Buildings are only drawn when zoomed in; at city scale they are just noise (and cost GPU time).
+pub fn update_buildings(
+    cam: Single<&Projection, With<Camera2d>>,
+    mut q: Query<&mut Visibility, With<BuildingLayer>>,
+) {
+    let want = if crate::ortho_scale(*cam) < 30.0 { Visibility::Visible } else { Visibility::Hidden };
+    for mut v in &mut q {
+        if *v != want {
+            *v = want;
+        }
     }
 }
 

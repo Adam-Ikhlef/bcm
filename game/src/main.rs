@@ -193,7 +193,7 @@ fn main() {
         )
         .add_systems(
             OnEnter(AppState::Playing),
-            (init_game, render::spawn_roads, render::spawn_stops, ui::spawn_game_ui).chain(),
+            (init_game, render::spawn_areas, render::spawn_roads, render::spawn_stops, ui::spawn_game_ui).chain(),
         )
         .add_systems(OnExit(AppState::Playing), cleanup_game)
         .add_systems(
@@ -207,6 +207,7 @@ fn main() {
                 spawn_passengers,
                 move_buses,
                 render::update_roads,
+                render::update_buildings,
                 render::update_stop_icons,
                 render::update_bus_scale,
                 render::draw_routes,

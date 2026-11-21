@@ -18,3 +18,5 @@ serde_json = "1"
 # Pure-Rust TLS (rustls): no OpenSSL needed on Windows/macOS/Linux
 ureq = "2"
 dirs = "6"
+# Polygon triangulation for buildings, parks and water
+earcutr = "0.4"

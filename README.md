@@ -59,6 +59,8 @@ Optional: `busmanager path/to/city.osm.pbf` loads a local extract.
 | "+ Bus" in the Lines panel | Add a bus to that line |
 | Space, 1 / 2 / 3 | Pause, speed 1x / 4x / 10x |
 
+Buildings, parks and water are drawn from OpenStreetMap too (buildings show when zoomed in), and stops near more buildings get more passengers.
+
 Hover a stop to see its name and waiting passengers. A red dot on a stop means people are piling up.
 
 ## Roadmap

@@ -75,6 +75,42 @@ pub struct Road {
     pub pts: Vec<Vec2>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AreaKind {
+    Water,
+    Park,
+    Building,
+}
+
+/// A filled polygon on the map (closed way, last point == first point is removed).
+pub struct Area {
+    pub kind: AreaKind,
+    pub pts: Vec<Vec2>,
+}
+
+/// Classify a way as a map area from its tags (`get` looks a tag up by key).
+fn area_kind<'a>(get: impl Fn(&str) -> Option<&'a str>) -> Option<AreaKind> {
+    if get("building").is_some_and(|v| v != "no") {
+        return Some(AreaKind::Building);
+    }
+    if matches!(get("natural"), Some("water"))
+        || matches!(get("waterway"), Some("riverbank"))
+        || matches!(get("landuse"), Some("reservoir" | "basin"))
+    {
+        return Some(AreaKind::Water);
+    }
+    if matches!(get("leisure"), Some("park" | "garden" | "playground" | "recreation_ground" | "nature_reserve"))
+        || matches!(
+            get("landuse"),
+            Some("grass" | "forest" | "meadow" | "recreation_ground" | "village_green" | "cemetery")
+        )
+        || matches!(get("natural"), Some("wood" | "scrub" | "grassland"))
+    {
+        return Some(AreaKind::Park);
+    }
+    None
+}
+
 pub struct Stop {
     pub name: String,
     pub pos: Vec2,
@@ -89,6 +125,7 @@ pub struct MapData {
     pub graph: DiGraph<Vec2, f32>,
     /// Road polylines for drawing.
     pub roads: Vec<Road>,
+    pub areas: Vec<Area>,
     pub stops: Vec<Stop>,
 }
 
@@ -142,6 +179,7 @@ impl MapData {
 }
 
 type RawWay = (Vec<i64>, bool, RoadClass); // (node ids, oneway, class)
+type RawArea = (Vec<i64>, AreaKind);
 
 /// Load a local .osm.pbf extract.
 pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
@@ -149,6 +187,7 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
     let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
     let mut raw_stops: Vec<(String, f64, f64)> = Vec::new();
     let mut ways: Vec<RawWay> = Vec::new();
+    let mut areas: Vec<RawArea> = Vec::new();
 
     for obj in reader.iter() {
         match obj? {
@@ -165,17 +204,19 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
                 }
             }
             OsmObj::Way(w) => {
-                let Some(class) = w.tags.get("highway").and_then(|h| RoadClass::from_tag(h.as_str())) else {
-                    continue;
-                };
-                let oneway =
-                    w.tags.contains("oneway", "yes") || w.tags.contains("junction", "roundabout");
-                ways.push((w.nodes.iter().map(|n| n.0).collect(), oneway, class));
+                let ids: Vec<i64> = w.nodes.iter().map(|n| n.0).collect();
+                if let Some(class) = w.tags.get("highway").and_then(|h| RoadClass::from_tag(h.as_str())) {
+                    let oneway =
+                        w.tags.contains("oneway", "yes") || w.tags.contains("junction", "roundabout");
+                    ways.push((ids, oneway, class));
+                } else if let Some(kind) = area_kind(|k| w.tags.get(k).map(|v| v.as_str())) {
+                    areas.push((ids, kind));
+                }
             }
             _ => {}
         }
     }
-    build(&nodes, raw_stops, &ways)
+    build(&nodes, raw_stops, &ways, &areas)
 }
 
 #[derive(Deserialize)]
@@ -200,6 +241,7 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
     let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
     let mut raw_stops: Vec<(String, f64, f64)> = Vec::new();
     let mut ways: Vec<RawWay> = Vec::new();
+    let mut areas: Vec<RawArea> = Vec::new();
 
     for el in resp.elements {
         match el.kind.as_str() {
@@ -219,18 +261,19 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
             }
             "way" => {
                 if let (Some(ids), Some(tags)) = (el.nodes, el.tags) {
-                    let Some(class) = tags.get("highway").and_then(|h| RoadClass::from_tag(h)) else {
-                        continue;
-                    };
-                    let oneway = tags.get("oneway").map(String::as_str) == Some("yes")
-                        || tags.get("junction").map(String::as_str) == Some("roundabout");
-                    ways.push((ids, oneway, class));
+                    if let Some(class) = tags.get("highway").and_then(|h| RoadClass::from_tag(h)) {
+                        let oneway = tags.get("oneway").map(String::as_str) == Some("yes")
+                            || tags.get("junction").map(String::as_str) == Some("roundabout");
+                        ways.push((ids, oneway, class));
+                    } else if let Some(kind) = area_kind(|k| tags.get(k).map(String::as_str)) {
+                        areas.push((ids, kind));
+                    }
                 }
             }
             _ => {}
         }
     }
-    build(&nodes, raw_stops, &ways)
+    build(&nodes, raw_stops, &ways, &areas)
 }
 
 fn cell_of(p: Vec2) -> (i32, i32) {
@@ -241,6 +284,7 @@ fn build(
     nodes: &HashMap<i64, (f64, f64)>,
     raw_stops: Vec<(String, f64, f64)>,
     ways: &[RawWay],
+    raw_areas: &[RawArea],
 ) -> Result<MapData, Box<dyn Error>> {
     if ways.is_empty() {
         return Err("no drivable roads found in this data".into());
@@ -295,6 +339,25 @@ fn build(
         }
     }
 
+    // Filled areas: only closed ways with every node present.
+    let mut areas: Vec<Area> = Vec::with_capacity(raw_areas.len());
+    let mut building_cells: HashMap<(i32, i32), u32> = HashMap::new();
+    for (ids, kind) in raw_areas {
+        if ids.len() < 4 || ids.first() != ids.last() {
+            continue;
+        }
+        let pts: Option<Vec<Vec2>> = ids[..ids.len() - 1]
+            .iter()
+            .map(|id| nodes.get(id).map(|&(lat, lon)| project(lat, lon)))
+            .collect();
+        let Some(pts) = pts else { continue };
+        if *kind == AreaKind::Building {
+            let c = pts.iter().copied().sum::<Vec2>() / pts.len() as f32;
+            *building_cells.entry(cell_of(c)).or_default() += 1;
+        }
+        areas.push(Area { kind: *kind, pts });
+    }
+
     // Spatial grid of road nodes: used for stop snapping and the density/demand proxy.
     let mut grid: HashMap<(i32, i32), Vec<(NodeIndex, Vec2)>> = HashMap::new();
     for i in graph.node_indices() {
@@ -309,8 +372,10 @@ fn build(
 
         let mut best: Option<(NodeIndex, Vec2)> = None;
         let mut density = 0usize;
+        let mut buildings = 0u32;
         for dx in -1..=1 {
             for dy in -1..=1 {
+                buildings += building_cells.get(&(cx + dx, cy + dy)).copied().unwrap_or(0);
                 if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
                     density += cell.len();
                     for &(i, p) in cell {
@@ -323,13 +388,18 @@ fn build(
         }
         if let Some((node, npos)) = best {
             if npos.distance(pos) <= MAX_SNAP_DISTANCE {
-                let demand = (density as f32 / 400.0).clamp(0.3, 3.0);
+                // Real buildings around the stop when the map has them, else road density.
+                let demand = if building_cells.is_empty() {
+                    (density as f32 / 400.0).clamp(0.3, 3.0)
+                } else {
+                    (buildings as f32 / 400.0).clamp(0.3, 3.0)
+                };
                 stops.push(Stop { name, pos: npos, node, demand });
             }
         }
     }
 
-    Ok(MapData { graph, roads, stops })
+    Ok(MapData { graph, roads, areas, stops })
 }
 
 #[cfg(test)]
@@ -341,6 +411,11 @@ mod tests {
         // Three nodes in a line, bus stops at both ends, one two-way road.
         let json = r#"{"elements":[
             {"type":"way","id":10,"nodes":[1,2,3],"tags":{"highway":"residential"}},
+            {"type":"way","id":11,"nodes":[4,5,6,4],"tags":{"building":"yes"}},
+            {"type":"way","id":12,"nodes":[4,5,6,4],"tags":{"leisure":"park"}},
+            {"type":"node","id":4,"lat":33.0003,"lon":-6.9990},
+            {"type":"node","id":5,"lat":33.0003,"lon":-6.9985},
+            {"type":"node","id":6,"lat":33.0008,"lon":-6.9985},
             {"type":"node","id":1,"lat":33.0000,"lon":-7.0000,"tags":{"highway":"bus_stop","name":"A"}},
             {"type":"node","id":3,"lat":33.0020,"lon":-7.0000,"tags":{"highway":"bus_stop","name":"B"}},
             {"type":"node","id":1,"lat":33.0000,"lon":-7.0000},
@@ -350,6 +425,10 @@ mod tests {
         let map = load_overpass(json.as_bytes()).expect("parse");
         assert_eq!(map.stops.len(), 2);
         assert_eq!(map.roads.len(), 1);
+        assert_eq!(map.areas.len(), 2);
+        assert_eq!(map.areas[0].kind, AreaKind::Building);
+        assert_eq!(map.areas[1].kind, AreaKind::Park);
+        assert_eq!(map.areas[0].pts.len(), 3);
         assert_eq!(map.roads[0].class, RoadClass::Minor);
         let route = map.route_loop(&[0, 1]).expect("route");
         // A -> B -> back, closing point removed: 4 points, stops at index 0 and 2.
