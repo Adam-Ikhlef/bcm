@@ -1,0 +1,57 @@
+name: Feature Request
+description: Suggest a new gameplay mechanic, bus/fleet feature, map option, or UI improvement
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make **Bus Company Manager** better? Tell us how it would work and why it fits the game.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project does this relate to?
+      options:
+        - Gameplay / Simulation
+        - Routes, Timetables & Stops
+        - Fleet, Depots & Maintenance
+        - UI / UX / HUD
+        - Map Data / Modding / Data Import
+        - Installer / Packaging
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What limitation or missing experience are you trying to solve?
+      placeholder: "e.g. Managing peak-hour frequencies on busy lines currently takes too many manual clicks..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe how you envision the feature behaving.
+      placeholder: "e.g. Add timetable templates or peak/off-peak frequency presets per line..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any other approaches or workarounds you thought about?
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checks
+      options:
+        - label: I searched existing issues to check if a similar feature was already requested.
+          required: true
