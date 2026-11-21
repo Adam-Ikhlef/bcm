@@ -1,0 +1,13 @@
+{
+  "name": "Double-Decker",
+  "model": "model.glb",
+  "length": 10.6,
+  "width": 2.55,
+  "height": 4.1,
+  "capacity": 90,
+  "price": 4800,
+  "fuel_per_km": 3.6,
+  "wear_per_km": 0.55,
+  "run_cost": 0.0048,
+  "color": "#cc1a1f"
+}

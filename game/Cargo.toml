@@ -10,6 +10,8 @@ bevy = { version = "0.16", default-features = false, features = [
     "bevy_asset", "bevy_color", "bevy_core_pipeline", "bevy_gizmos", "bevy_log",
     "bevy_render", "bevy_sprite", "bevy_state", "bevy_text", "bevy_ui",
     "bevy_window", "bevy_winit", "x11", "wayland",
+    # 3D depot, glTF bus models (also used for player-made bus mods)
+    "bevy_pbr", "bevy_gltf", "bevy_scene", "png", "jpeg",
 ] }
 osmpbfreader = "0.19"
 petgraph = "0.6"

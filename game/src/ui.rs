@@ -3,8 +3,10 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
-    osm::MapData, style, Bus, Draft, Economy, Hover, Lines, StopQueues, Tool, UiBlock, BUSES_PER_NEW_LINE,
-    BUS_PRICE,
+    depot::{MapUi, View},
+    fleet::Fleet,
+    osm::MapData,
+    style, Bus, Draft, Economy, Hover, Lines, StopQueues, Tool, UiBlock,
 };
 
 // --- Shared widgets ----------------------------------------------------------
@@ -45,6 +47,12 @@ pub enum Action {
     Finish,
     Cancel,
     AddBus(usize),
+    RemoveBus(usize),
+    SetView(View),
+    SelectBus(u32),
+    Buy(usize),
+    Service(u32),
+    Sell(u32),
     Pause,
     Speed(u8),
     Menu,
@@ -103,8 +111,9 @@ pub fn button(fonts: &UiFonts, label: impl Into<String>, action: Action, kind: B
     )
 }
 
-fn is_active(action: Action, vtime: &Time<Virtual>) -> bool {
+fn is_active(action: Action, vtime: &Time<Virtual>, view: View) -> bool {
     match action {
+        Action::SetView(v) => view == v,
         Action::Pause => vtime.is_paused(),
         Action::Speed(n) => !vtime.is_paused() && (vtime.relative_speed() - n as f32).abs() < 0.01,
         _ => false,
@@ -113,10 +122,11 @@ fn is_active(action: Action, vtime: &Time<Virtual>) -> bool {
 
 pub fn button_visuals(
     vtime: Res<Time<Virtual>>,
+    view: Res<View>,
     mut q: Query<(&Interaction, &ButtonColors, &Action, &mut BackgroundColor, &mut BorderColor)>,
 ) {
     for (interaction, c, action, mut bg, mut border) in &mut q {
-        let (nb, nd) = if c.toggle && is_active(*action, &vtime) {
+        let (nb, nd) = if c.toggle && is_active(*action, &vtime, *view) {
             (style::ACCENT_LIGHT, style::ACCENT)
         } else {
             let b = match interaction {
@@ -265,6 +275,9 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             (
                 Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() },
                 children![
+                    button(f, "Map", Action::SetView(View::Map), BtnKind::Toggle),
+                    button(f, "Depot", Action::SetView(View::Depot), BtnKind::Toggle),
+                    Node { width: Val::Px(10.0), ..default() },
                     button(f, "Pause", Action::Pause, BtnKind::Toggle),
                     button(f, "1x", Action::Speed(1), BtnKind::Toggle),
                     button(f, "4x", Action::Speed(4), BtnKind::Toggle),
@@ -278,6 +291,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
     // Lines panel
     commands.spawn((
         GameUi,
+        MapUi,
         Interaction::default(),
         Node {
             position_type: PositionType::Absolute,
@@ -305,6 +319,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
     // Bottom toolbar
     commands.spawn((
         GameUi,
+        MapUi,
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(16.0),
@@ -343,12 +358,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
                     },
                     children![
                         (DrawText, text(f, true, 14.0, style::TEXT, "")),
-                        button(
-                            f,
-                            format!("Finish  ({})", fmt_money(BUS_PRICE * BUSES_PER_NEW_LINE as f64)),
-                            Action::Finish,
-                            BtnKind::Primary
-                        ),
+                        button(f, "Finish line  (Enter)", Action::Finish, BtnKind::Primary),
                         button(f, "Cancel  (Esc)", Action::Cancel, BtnKind::Normal),
                     ]
                 ),
@@ -398,6 +408,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
 pub fn update_stats(
     eco: Res<Economy>,
     queues: Res<StopQueues>,
+    fleet: Res<Fleet>,
     buses: Query<&Bus>,
     mut q: Query<(&StatText, &mut Text, &mut TextColor)>,
 ) {
@@ -410,7 +421,7 @@ pub fn update_stats(
             Stat::Profit => (fmt_signed(profit), if profit < 0.0 { style::DANGER } else { style::ACCENT }),
             Stat::Riders => (group_digits(eco.boarded as i64), style::TEXT),
             Stat::Waiting => (format!("{}", waiting as i64), style::TEXT),
-            Stat::Buses => (format!("{bus_count}"), style::TEXT),
+            Stat::Buses => (format!("{bus_count} / {}", fleet.buses.len()), style::TEXT),
         };
         if t.0 != s {
             t.0 = s;
@@ -473,7 +484,13 @@ pub fn update_lines_panel(
                             ),
                         ]
                     ),
-                    button(f, format!("+ Bus  {}", fmt_money(BUS_PRICE)), Action::AddBus(i), BtnKind::Small),
+                    (
+                        Node { column_gap: Val::Px(4.0), ..default() },
+                        children![
+                            button(f, "–", Action::RemoveBus(i), BtnKind::Small),
+                            button(f, "+ Bus", Action::AddBus(i), BtnKind::Small),
+                        ]
+                    ),
                 ],
             ));
         }

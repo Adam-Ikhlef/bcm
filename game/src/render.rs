@@ -10,6 +10,7 @@ use bevy::{
 };
 
 use crate::{
+    depot::MapCamera,
     osm::{AreaKind, MapData, Road, RoadClass},
     style, Bus, Draft, GameWorld, Lines, StopQueues, MAX_WAITING,
 };
@@ -193,7 +194,7 @@ pub fn spawn_roads(
 /// Rebuilds road meshes when the zoom changes enough for the pixel-based minimum widths to matter.
 /// At most one road class is rebuilt per frame to avoid spikes.
 pub fn update_roads(
-    cam: Single<&Projection, With<Camera2d>>,
+    cam: Single<&Projection, With<MapCamera>>,
     map: Res<MapData>,
     mut layers: ResMut<RoadLayers>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -291,7 +292,7 @@ pub fn spawn_areas(
 
 /// Buildings are only drawn when zoomed in; at city scale they are just noise (and cost GPU time).
 pub fn update_buildings(
-    cam: Single<&Projection, With<Camera2d>>,
+    cam: Single<&Projection, With<MapCamera>>,
     mut q: Query<&mut Visibility, With<BuildingLayer>>,
 ) {
     let want = if crate::ortho_scale(*cam) < 30.0 { Visibility::Visible } else { Visibility::Hidden };
@@ -441,7 +442,7 @@ pub fn spawn_stops(mut commands: Commands, map: Res<MapData>, icons: Res<Icons>)
 
 /// Keeps stop icons a constant size on screen; the badge grows with the number of waiting passengers.
 pub fn update_stop_icons(
-    cam: Single<&Projection, With<Camera2d>>,
+    cam: Single<&Projection, With<MapCamera>>,
     queues: Res<StopQueues>,
     mut stops: Query<(&StopMarker, &mut Transform, &Children)>,
     mut badges: Query<(&mut Sprite, &mut Visibility), With<StopBadge>>,
@@ -468,7 +469,7 @@ pub fn update_stop_icons(
 }
 
 /// Buses stay visible when zoomed out.
-pub fn update_bus_scale(cam: Single<&Projection, With<Camera2d>>, mut buses: Query<&mut Transform, With<Bus>>) {
+pub fn update_bus_scale(cam: Single<&Projection, With<MapCamera>>, mut buses: Query<&mut Transform, With<Bus>>) {
     let scale = crate::ortho_scale(*cam);
     let f = (scale * 0.8).max(1.0); // roughly 21 x 8 screen pixels when zoomed out
     for mut tf in &mut buses {
@@ -491,7 +492,7 @@ pub fn draw_routes(
     map: Res<MapData>,
     lines: Res<Lines>,
     draft: Res<Draft>,
-    cam: Single<&Projection, With<Camera2d>>,
+    cam: Single<&Projection, With<MapCamera>>,
 ) {
     let scale = crate::ortho_scale(*cam);
     for l in &lines.0 {

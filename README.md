@@ -54,17 +54,35 @@ Optional: `busmanager path/to/city.osm.pbf` loads a local extract.
 | Right / middle mouse drag, WASD, arrows | Pan |
 | Mouse wheel | Zoom |
 | N or "New line" | Start a line; click bus stops in order |
-| Enter or "Finish" | Open the line (3 buses) |
+| Enter or "Finish" | Open the line (free; auto-assigns up to 2 idle buses) |
 | Esc | Cancel |
 | "+ Bus" in the Lines panel | Add a bus to that line |
 | Space, 1 / 2 / 3 | Pause, speed 1x / 4x / 10x |
+| Tab or Map/Depot buttons | Switch between map and 3D depot |
 
 Buildings, parks and water are drawn from OpenStreetMap too (buildings show when zoomed in), and stops near more buildings get more passengers.
 
 Hover a stop to see its name and waiting passengers. A red dot on a stop means people are piling up.
 
+## The depot and your fleet
+
+The Depot view shows your parked buses in 3D (16 bays). Click a bus to see its card and side panel
+(Service / Sell); hover cards show fuel, condition and cleanliness. Buy new buses in the fleet shop,
+then assign them to lines from the map ("+ Bus"). Buses wear out while running and return to the
+depot when they need service. Selling returns 60% of the price. Depot camera: wheel zoom, right/middle drag, WASD.
+
+## Bus mods
+
+Built-in buses: City Bus, Articulated, Minibus. Add your own by dropping a folder into
+`<user data dir>/BusManager/mods/buses/<name>/` (or `mods/buses/` next to the executable) containing
+`model.glb` and `bus.json`. See `mods_example/buses/double-decker`. Model convention: origin on the ground
+below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.json` fields: `name`,
+`capacity`, `price`, optional `length`, `width`, `height`, `rotation_y`, `scale`.
+
 ## Roadmap
 
+- [x] 3D depot, fleet shop, bus mods
+- [ ] CBM-style route-planning screen
 - [ ] Real demand from buildings/POIs and passenger destinations
 - [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
 - [ ] Per-line profit graphs, bus upgrades, loans
