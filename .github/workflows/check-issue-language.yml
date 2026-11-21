@@ -16,22 +16,58 @@ jobs:
         with:
           script: |
             const issue = context.payload.issue;
-            const title = issue.title || "";
+
+            // Strip "[Bug]: " or "[Feature]: " prefix from title
+            const cleanTitle = (issue.title || "")
+              .replace(/^\[(bug|feature)\]:\s*/i, "")
+              .trim();
+
             const body = issue.body || "";
 
-            // Strip code blocks, URLs, and issue template headings so logs/paths don't skew detection
-            const cleanedText = `${title}\n${body}`
+            // Extract only free-text sections from the issue form (if structured form is used)
+            const freeTextHeaders = [
+              "What happened?",
+              "Steps to Reproduce",
+              "Problem or Motivation",
+              "Proposed Solution",
+              "Alternatives Considered",
+            ];
+
+            let userTextParts = [cleanTitle];
+            const sections = body.split(/^###\s+/m);
+
+            if (sections.length > 1) {
+              for (const section of sections.slice(1)) {
+                const newlineIdx = section.indexOf("\n");
+                if (newlineIdx === -1) continue;
+                const heading = section.slice(0, newlineIdx).trim();
+                const content = section.slice(newlineIdx + 1).trim();
+
+                if (freeTextHeaders.some(h => h.toLowerCase() === heading.toLowerCase())) {
+                  if (content && content !== "_No response_") {
+                    userTextParts.push(content);
+                  }
+                }
+              }
+            } else {
+              // Fallback for plain issues not using the YAML template
+              userTextParts.push(body);
+            }
+
+            const cleanedText = userTextParts
+              .join("\n")
               .replace(/```[\s\S]*?```/g, " ")
               .replace(/`[^`]*`/g, " ")
               .replace(/https?:\/\/\S+/g, " ")
-              .replace(/^###\s+.*$/gm, " ")
+              .replace(/^- \[[ xX]\].*$/gm, " ")
               .replace(/\s+/g, " ")
               .trim();
 
-            // Skip very short texts or pure logs/numbers
+            core.info(`Extracted user text: "${cleanedText}"`);
+
             const letters = cleanedText.replace(/[^a-zA-ZÀ-ÿ\u0400-\u04FF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/g, "");
-            if (letters.length < 15) {
-              core.info("Text too short to reliably determine language; leaving open.");
+            if (letters.length < 4) {
+              core.info("User text too short to reliably determine language; leaving open.");
               return;
             }
 
@@ -39,7 +75,7 @@ jobs:
             const nonLatinMatches = cleanedText.match(/[\u0400-\u04FF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/g) || [];
             const nonLatinRatio = nonLatinMatches.length / letters.length;
 
-            // 2. Check common English words vs common non-English Latin words
+            // 2. Check common English words for Latin-script languages (French, Spanish, German, etc.)
             const words = cleanedText.toLowerCase().match(/[a-zà-ÿ']+/g) || [];
             const englishStopwords = new Set([
               "the", "is", "are", "was", "were", "be", "been", "to", "of", "and",
@@ -61,7 +97,7 @@ jobs:
             const englishHits = words.filter(w => englishStopwords.has(w)).length;
             const englishRatio = words.length > 0 ? englishHits / words.length : 0;
 
-            const isNonEnglish = nonLatinRatio > 0.2 || (words.length >= 8 && englishRatio < 0.08);
+            const isNonEnglish = nonLatinRatio > 0.2 || (words.length >= 6 && englishRatio < 0.08);
 
             if (!isNonEnglish) {
               core.info("Issue appears to be in English. Doing nothing.");
