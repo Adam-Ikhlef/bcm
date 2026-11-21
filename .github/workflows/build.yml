@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # The installer downloads releases from this repository.
+  BUSMANAGER_REPO: ${{ github.repository }}
+
 jobs:
   build:
     strategy:
@@ -17,13 +21,10 @@ jobs:
         include:
           - os: ubuntu-latest
             name: linux
-            ext: ""
           - os: windows-latest
             name: windows
-            ext: ".exe"
           - os: macos-latest
             name: macos
-            ext: ""
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -33,31 +34,38 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build
-        run: cargo build --release
+      - name: Build game and installer
+        run: cargo build --release --workspace
 
-      - name: Package
-        shell: bash
+      - name: Package (Linux / macOS)
+        if: runner.os != 'Windows'
         run: |
-          mkdir -p dist/busmanager
-          cp target/release/busmanager${{ matrix.ext }} dist/busmanager/
-          mkdir -p dist/busmanager/assets
-          cp README.md dist/busmanager/
-          tar -czf busmanager-${{ matrix.name }}.tar.gz -C dist busmanager
+          mkdir -p dist/pack
+          cp target/release/busmanager dist/pack/
+          tar -czf dist/busmanager-${{ matrix.name }}.tar.gz -C dist/pack busmanager
+          cp target/release/busmanager-installer dist/BusManager-Setup-${{ matrix.name }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target/release/busmanager.exe -DestinationPath dist/busmanager-windows.zip
+          Copy-Item target/release/busmanager-installer.exe dist/BusManager-Setup-windows.exe
 
       - uses: actions/upload-artifact@v4
         with:
           name: busmanager-${{ matrix.name }}
-          path: busmanager-${{ matrix.name }}.tar.gz
+          path: dist/*
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: busmanager-${{ matrix.name }}.tar.gz
+          files: dist/*
