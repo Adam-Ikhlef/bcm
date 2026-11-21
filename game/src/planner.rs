@@ -59,6 +59,27 @@ pub struct Preview {
 pub struct Search {
     pub focus: bool,
     pub text: String,
+    pub route_page: usize,
+}
+
+const ROUTE_PAGE: usize = 5;
+
+/// Real routes whose number or name contains the query (all routes when the query is empty).
+pub fn route_matches(map: &MapData, query: &str) -> Vec<usize> {
+    let q = query.trim().to_lowercase();
+    map.routes
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| q.is_empty() || r.ref_.to_lowercase().contains(&q) || r.name.to_lowercase().contains(&q))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Extra info for the line being created (set when adopting a real OpenStreetMap route).
+#[derive(Resource, Default)]
+pub struct DraftMeta {
+    pub name: Option<String>,
+    pub interval: Option<u32>,
 }
 
 #[derive(Component)]
@@ -173,9 +194,11 @@ pub fn search_input(
                 }
                 Key::Backspace => {
                     search.text.pop();
+                    search.route_page = 0;
                 }
                 Key::Space => search.text.push(' '),
                 Key::Character(s) => {
+                    search.route_page = 0;
                     for c in s.chars().filter(|c| !c.is_control()) {
                         search.text.push(c);
                     }
@@ -192,6 +215,7 @@ pub fn planner_actions(
     mut events: EventReader<UiAction>,
     mut draft: ResMut<Draft>,
     mut search: ResMut<Search>,
+    mut meta: ResMut<DraftMeta>,
     map: Res<MapData>,
     mut cam: Single<&mut Transform, With<MapCamera>>,
 ) {
@@ -205,6 +229,22 @@ pub fn planner_actions(
                     cam.translation.y = s.pos.y;
                     search.text.clear();
                 }
+            }
+            Action::AdoptRoute(i) => {
+                if let Some(r) = map.routes.get(i) {
+                    draft.0 = r.stops.iter().map(|&s| Wp::Stop(s)).collect();
+                    meta.name = Some(if r.ref_.is_empty() { r.name.clone() } else { format!("Line {}", r.ref_) });
+                    meta.interval = r.interval_min;
+                    if let Some(&s) = r.stops.first() {
+                        cam.translation.x = map.stops[s].pos.x;
+                        cam.translation.y = map.stops[s].pos.y;
+                    }
+                    search.text.clear();
+                }
+            }
+            Action::RoutePage(d) => {
+                let pages = route_matches(&map, &search.text).len().div_ceil(ROUTE_PAGE).max(1);
+                search.route_page = (search.route_page as i32 + d).clamp(0, pages as i32 - 1) as usize;
             }
             Action::DraftRemove(i) => {
                 if i < draft.0.len() {
@@ -351,6 +391,35 @@ pub fn rebuild_planner(
         }
         if !search.text.is_empty() && matches(&map, &search.text).is_empty() {
             p.spawn(text(f, false, 12.0, style::MUTED, "No stop with that name"));
+        }
+
+        // Real routes from OpenStreetMap
+        let found = route_matches(&map, &search.text);
+        if !map.routes.is_empty() && !found.is_empty() {
+            let pages = found.len().div_ceil(ROUTE_PAGE);
+            let page = search.route_page.min(pages - 1);
+            p.spawn((
+                Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() },
+                children![
+                    text(f, true, 12.0, style::MUTED, format!("REAL ROUTES (OSM) · {}", found.len())),
+                    (
+                        Node { align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() },
+                        children![
+                            button(f, "‹", Action::RoutePage(-1), BtnKind::Small),
+                            text(f, false, 12.0, style::MUTED, format!("{}/{}", page + 1, pages)),
+                            button(f, "›", Action::RoutePage(1), BtnKind::Small),
+                        ]
+                    ),
+                ],
+            ));
+            for &ri in found.iter().skip(page * ROUTE_PAGE).take(ROUTE_PAGE) {
+                let r = &map.routes[ri];
+                let mut label = if r.ref_.is_empty() { r.name.clone() } else { format!("{} · {}", r.ref_, r.name) };
+                if label.chars().count() > 34 {
+                    label = label.chars().take(33).collect::<String>() + "…";
+                }
+                p.spawn(button(f, label, Action::AdoptRoute(ri), BtnKind::Small));
+            }
         }
 
         p.spawn(text(f, true, 12.0, style::MUTED, "ROUTE"));

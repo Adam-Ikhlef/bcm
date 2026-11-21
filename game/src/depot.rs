@@ -26,6 +26,7 @@ pub enum View {
     #[default]
     Map,
     Depot,
+    Staff,
 }
 
 pub fn in_map_view(v: Res<View>) -> bool {
@@ -89,7 +90,8 @@ pub fn apply_view(
     mut depot_ui: Query<&mut Node, (With<DepotUi>, Without<MapUi>)>,
     mut cards: Query<&mut Node, (With<BusCard>, Without<MapUi>, Without<DepotUi>)>,
 ) {
-    let map = *view == View::Map;
+    let map = *view != View::Depot;
+    let map_ui_on = *view == View::Map;
     for mut c in &mut map_cam {
         if c.is_active != map {
             c.is_active = map;
@@ -100,7 +102,7 @@ pub fn apply_view(
             c.is_active = !map;
         }
     }
-    let (m, d) = if map { (Display::Flex, Display::None) } else { (Display::None, Display::Flex) };
+    let (m, d) = if map_ui_on { (Display::Flex, Display::None) } else if map { (Display::None, Display::None) } else { (Display::None, Display::Flex) };
     for mut n in &mut map_ui {
         if n.display != m {
             n.display = m;
@@ -126,6 +128,19 @@ const COLS: usize = 8;
 const BAY_W: f32 = 5.0;
 const BAY_L: f32 = 20.0;
 const LANE: f32 = 9.0;
+
+/// Path a departing bus drives inside the yard: out of its bay, along an apron, then east off the lot.
+pub fn exit_path(bay: usize) -> Vec<Vec3> {
+    let p = bay_pos(bay);
+    let lot_w = COLS as f32 * BAY_W + 10.0;
+    let lot_d = 2.0 * BAY_L + LANE + 8.0;
+    let lane_z = if bay / COLS == 0 { 0.0 } else { lot_d / 2.0 - 2.0 };
+    vec![p, Vec3::new(p.x, 0.0, lane_z), Vec3::new(lot_w / 2.0 + 24.0, 0.0, lane_z)]
+}
+
+pub fn exit_length(bay: usize) -> f32 {
+    exit_path(bay).windows(2).map(|w| w[0].distance(w[1])).sum()
+}
 
 pub fn bay_pos(bay: usize) -> Vec3 {
     let col = (bay % COLS) as f32;
@@ -297,6 +312,12 @@ pub fn spawn_depot_scene(
     place(&cube, &road, Vec3::new(xs, 0.07, 0.0), Vec3::new(street_w, 0.16, 2.0 * reach));
     // Depot driveway
     place(&cube, &road, Vec3::new(0.0, 0.06, (lot_d / 2.0 + zs - street_w / 2.0) / 2.0), Vec3::new(14.0, 0.16, zs - street_w / 2.0 - lot_d / 2.0 + 0.2));
+    // Yard exits to the side street (buses leave along the middle lane and the front apron)
+    for z in [0.0, lot_d / 2.0 - 2.0] {
+        let x0 = lot_w / 2.0 - 1.0;
+        let x1 = xs - street_w / 2.0 + 0.5;
+        place(&cube, &road, Vec3::new((x0 + x1) / 2.0, 0.065, z), Vec3::new(x1 - x0, 0.16, 8.0));
+    }
     // Lane markings (dashed), skipped inside the intersection
     let mut x = -reach + 3.0;
     while x < reach - 3.0 {
@@ -758,6 +779,10 @@ pub fn update_cards(
     for (card, mut node, mut border) in &mut cards {
         let Some(b) = fleet.get(card.0) else { continue };
         let Some(bay) = b.bay else { continue };
+        if b.depart.is_some() {
+            node.display = Display::None;
+            continue;
+        }
         let spec = &catalog.0[b.spec];
         let anchor = bay_pos(bay) + Vec3::new(0.0, spec.height + 0.4, 0.0);
         match camera.world_to_viewport(gt, anchor) {
@@ -799,10 +824,17 @@ pub fn update_cards(
     }
     for (s, mut t, mut c) in &mut statuses {
         let Some(b) = fleet.get(s.0) else { continue };
-        let (label, color) =
-            if b.needs_service() { ("Needs service", style::DANGER) } else { ("Operational", style::ACCENT) };
+        let (label, color) = if b.needs_service() {
+            ("Needs service".to_string(), style::DANGER)
+        } else if b.depart.is_some() {
+            ("Leaving the depot".to_string(), style::ACCENT)
+        } else if let Some(l) = b.assigned {
+            (format!("Ready · Line {}", l + 1), style::ACCENT)
+        } else {
+            ("Ready · no line".to_string(), style::ACCENT)
+        };
         if t.0 != label {
-            t.0 = label.to_string();
+            t.0 = label;
         }
         if c.0 != color {
             c.0 = color;
@@ -899,6 +931,16 @@ pub fn rebuild_panel(
                     children![
                         text(f, true, 15.0, style::TEXT, b.plate.clone()),
                         text(f, false, 12.0, style::MUTED, format!("{} · max. {} passengers", spec.name, spec.capacity as i32)),
+                        text(
+                            f,
+                            true,
+                            12.0,
+                            style::TEXT,
+                            match b.assigned {
+                                Some(l) => format!("Assigned to line {}", l + 1),
+                                None => "Not assigned to a line (use “+ Bus” on the map)".to_string(),
+                            }
+                        ),
                         stat_line(f, "Fuel", b.fuel),
                         stat_line(f, "Condition", b.condition),
                         stat_line(f, "Cleanliness", b.clean),
@@ -981,7 +1023,7 @@ pub fn depot_actions(
             }
             Action::Service(id) => {
                 let Some(b) = fleet.get(id) else { continue };
-                if b.line.is_some() {
+                if b.line.is_some() || b.depart.is_some() {
                     continue;
                 }
                 let cost = b.service_cost();
@@ -1003,7 +1045,7 @@ pub fn depot_actions(
             }
             Action::Sell(id) => {
                 let Some(b) = fleet.get(id) else { continue };
-                if b.line.is_some() {
+                if b.line.is_some() || b.depart.is_some() {
                     continue;
                 }
                 let value = catalog.0[b.spec].price * 0.6;
@@ -1015,5 +1057,35 @@ pub fn depot_actions(
             }
             _ => {}
         }
+    }
+}
+
+
+/// Drives departing buses out of their bays in the 3D depot.
+pub fn animate_departures(fleet: Res<Fleet>, mut q: Query<(&DepotBus, &mut Transform)>) {
+    for (d, mut tf) in &mut q {
+        let Some(b) = fleet.get(d.0) else { continue };
+        let (Some(bay), Some(dep)) = (b.bay, b.depart) else { continue };
+        let path = exit_path(bay);
+        let mut dist = dep.elapsed * crate::dispatch::EXIT_SPEED;
+        let mut heading = Vec3::Z;
+        let mut pos = path[0];
+        for w in path.windows(2) {
+            let seg = w[1] - w[0];
+            let len = seg.length();
+            heading = seg / len.max(1e-3);
+            if dist <= len {
+                pos = w[0] + heading * dist;
+                dist = -1.0;
+                break;
+            }
+            dist -= len;
+            pos = w[1];
+        }
+        let _ = dist;
+        let yaw = heading.x.atan2(heading.z);
+        let target = Quat::from_rotation_y(yaw);
+        tf.translation = pos;
+        tf.rotation = tf.rotation.slerp(target, 0.12);
     }
 }

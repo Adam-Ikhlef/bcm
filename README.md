@@ -72,11 +72,14 @@ Optional: `busmanager path/to/city.osm.pbf` loads a local extract.
 | Click a stop / click a road | Add the stop / add a waypoint that bends the route along roads |
 | Search box (click it, type, Enter) | Find a stop by name and add it |
 | Backspace or "Undo" | Remove the last stop or waypoint |
-| Enter or "Finish" | Open the line (free; auto-assigns up to 2 idle buses) |
+| Enter or "Finish" | Open the line (free; assigns up to 2 unassigned buses) |
+| Real routes list in the planner | Adopt a real OpenStreetMap bus route (stops, name, interval) as a starting point |
+| "Timetable" in the Lines panel | First/last departure, interval and bus count; shows today's departures |
 | Esc | Cancel |
 | "+ Bus" in the Lines panel | Add a bus to that line |
 | Space, 1 / 2 / 3 | Pause, speed 1x / 4x / 10x |
 | Tab or Map/Depot buttons | Switch between map and 3D depot |
+| Staff button | Hire and fire drivers |
 
 Buildings, parks and water are drawn from OpenStreetMap too (buildings show when zoomed in), and stops near more buildings get more passengers.
 
@@ -88,6 +91,25 @@ The Depot view shows your parked buses in 3D (16 bays). Click a bus to see its c
 (Service / Sell); hover cards show fuel, condition and cleanliness. Buy new buses in the fleet shop,
 then assign them to lines from the map ("+ Bus"). Buses wear out while running and return to the
 depot when they need service. Selling returns 60% of the price. Depot camera: wheel zoom, right/middle drag, WASD.
+
+## Timetables, shifts and staff
+
+The game has a clock (1 real second = 3 game seconds; the day starts at 05:30). Each line has a timetable
+(default 06:00–20:30 every 15 minutes, or the `interval` of the imported OSM route). A bus assigned to the
+line leaves the depot shortly before each departure, drives to the first stop, waits for the departure
+time, runs a loop and either serves the next departure or returns to the depot. Every trip needs a driver
+whose shift covers the departure time: **Early** 05:00–13:00, **Late** 13:00–21:00, **Night** 21:00–05:00.
+Drivers are paid daily at midnight whether they drive or not; better drivers cost more but use less fuel and
+wear buses less. Hire from the candidate list in the Staff view (new candidates every morning). Trips
+with no bus or no driver are shown as missed in the timetable panel. Passenger demand follows the time of
+day (rush hours around 08:00 and 17:00, quiet nights).
+
+## Real bus routes
+
+The city download now includes OpenStreetMap `route=bus` relations. In the route planner they are listed
+under "Real routes (OSM)" (search by number or name); picking one fills the stop list, which you can adjust
+before pressing Finish. Cities downloaded with older versions keep working but have no real routes until
+they are downloaded again (delete the city's cache file in the BusManager `cache` folder).
 
 ## Bus mods
 
@@ -101,7 +123,8 @@ below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.js
 
 - [x] 3D depot, fleet shop, bus mods
 - [x] Route-planning screen (waypoints, stop search, live length/time)
-- [ ] Shifts: buses leave the depot shortly before their timetable starts
+- [x] Timetables, shifts, staff, real OSM routes
+- [ ] Depot expansion and rooms, bus stop shelters, passengers' destinations
 - [ ] Real demand from buildings/POIs and passenger destinations
 - [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
 - [ ] Per-line profit graphs, bus upgrades, loans

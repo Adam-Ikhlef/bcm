@@ -245,6 +245,17 @@ pub fn scan_mods(dirs: &ModDirs) -> Vec<BusSpec> {
 
 // --- Owned buses --------------------------------------------------------------
 
+/// A bus that has been dispatched and is driving out of the depot (3D animation), about to join its line.
+#[derive(Clone, Copy, Debug)]
+pub struct Depart {
+    pub line: usize,
+    pub driver: u32,
+    /// Absolute game minute the first stop must be departed.
+    pub wait_until: f64,
+    pub elapsed: f32,
+    pub total: f32,
+}
+
 pub struct FleetBus {
     pub id: u32,
     pub plate: String,
@@ -256,6 +267,9 @@ pub struct FleetBus {
     /// Line index while driving, `None` while parked in the depot.
     pub line: Option<usize>,
     pub bay: Option<usize>,
+    /// The line this bus is assigned to (it leaves the depot for that line's departures).
+    pub assigned: Option<usize>,
+    pub depart: Option<Depart>,
 }
 
 impl FleetBus {
@@ -304,6 +318,8 @@ impl Fleet {
             clean: 100.0,
             line: None,
             bay: Some(bay),
+            assigned: None,
+            depart: None,
         });
         self.version += 1;
         Some(id)
@@ -317,9 +333,28 @@ impl Fleet {
         self.buses.iter_mut().find(|b| b.id == id)
     }
 
-    /// First bus that is parked and fit to drive.
-    pub fn idle_operational(&self) -> Option<u32> {
-        self.buses.iter().find(|b| b.line.is_none() && !b.needs_service()).map(|b| b.id)
+    /// A bus that is parked, fit to drive and not assigned to any line yet.
+    pub fn unassigned_operational(&self) -> Option<u32> {
+        self.buses
+            .iter()
+            .find(|b| b.line.is_none() && b.assigned.is_none() && b.depart.is_none() && !b.needs_service())
+            .map(|b| b.id)
+    }
+
+    /// A bus of `line` that is waiting in the depot and fit to drive.
+    pub fn ready_for(&self, line: usize) -> Option<u32> {
+        self.buses
+            .iter()
+            .find(|b| b.assigned == Some(line) && b.line.is_none() && b.depart.is_none() && b.bay.is_some() && !b.needs_service())
+            .map(|b| b.id)
+    }
+
+    pub fn assigned_count(&self, line: usize) -> usize {
+        self.buses.iter().filter(|b| b.assigned == Some(line)).count()
+    }
+
+    pub fn running_count(&self, line: usize) -> usize {
+        self.buses.iter().filter(|b| b.line == Some(line) || b.depart.is_some_and(|d| d.line == line)).count()
     }
 
     /// Bring a bus back to the depot.
@@ -358,7 +393,7 @@ mod tests {
         f.get_mut(b).unwrap().fuel = 0.0;
         assert!(f.get(b).unwrap().needs_service());
         assert!((f.get(b).unwrap().service_cost() - 50.0).abs() < 1e-6);
-        assert_eq!(f.idle_operational(), Some(a));
+        assert_eq!(f.unassigned_operational(), Some(a));
     }
 
     #[test]

@@ -112,6 +112,7 @@ fn area_kind<'a>(get: impl Fn(&str) -> Option<&'a str>) -> Option<AreaKind> {
 }
 
 pub struct Stop {
+    pub osm_id: i64,
     pub name: String,
     pub pos: Vec2,
     pub node: NodeIndex,
@@ -127,7 +128,28 @@ pub struct MapData {
     pub roads: Vec<Road>,
     pub areas: Vec<Area>,
     pub stops: Vec<Stop>,
+    /// Real bus routes from OpenStreetMap route relations (stops resolved to `stops` indices).
+    pub routes: Vec<BusRoute>,
 }
+
+/// A real-world bus route imported from OpenStreetMap.
+#[derive(Clone, Debug)]
+pub struct BusRoute {
+    pub ref_: String,
+    pub name: String,
+    pub stops: Vec<usize>,
+    pub interval_min: Option<u32>,
+}
+
+/// Raw route relation before stop ids are resolved: (ref, name, interval, ordered stop node ids).
+pub struct RawRoute {
+    pub ref_: String,
+    pub name: String,
+    pub interval_min: Option<u32>,
+    pub stops: Vec<i64>,
+}
+
+type RawStop = (i64, String, f64, f64);
 
 /// A looping bus route.
 #[derive(Clone)]
@@ -200,7 +222,8 @@ type RawArea = (Vec<i64>, AreaKind);
 pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
     let mut reader = OsmPbfReader::new(File::open(path)?);
     let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
-    let mut raw_stops: Vec<(String, f64, f64)> = Vec::new();
+    let mut raw_stops: Vec<RawStop> = Vec::new();
+    let mut raw_routes: Vec<RawRoute> = Vec::new();
     let mut ways: Vec<RawWay> = Vec::new();
     let mut areas: Vec<RawArea> = Vec::new();
 
@@ -215,7 +238,7 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
                         .get("name")
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "Bus stop".to_string());
-                    raw_stops.push((name, lat, lon));
+                    raw_stops.push((n.id.0, name, lat, lon));
                 }
             }
             OsmObj::Way(w) => {
@@ -228,10 +251,38 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
                     areas.push((ids, kind));
                 }
             }
-            _ => {}
+            OsmObj::Relation(r) => {
+                if !r.tags.contains("route", "bus") {
+                    continue;
+                }
+                let node_members: Vec<(i64, String)> = r
+                    .refs
+                    .iter()
+                    .filter_map(|m| match m.member {
+                        osmpbfreader::OsmId::Node(id) => Some((id.0, m.role.to_string())),
+                        _ => None,
+                    })
+                    .collect();
+                let has_platform = node_members.iter().any(|(_, role)| role.starts_with("platform"));
+                let stops: Vec<i64> = node_members
+                    .iter()
+                    .filter(|(_, role)| if has_platform { role.starts_with("platform") } else { role.starts_with("stop") })
+                    .map(|(id, _)| *id)
+                    .collect();
+                let get = |k: &str| r.tags.get(k).map(|v| v.to_string());
+                let ref_ = get("ref").unwrap_or_default();
+                let name = get("name")
+                    .or_else(|| match (get("from"), get("to")) {
+                        (Some(f), Some(t)) => Some(format!("{f} → {t}")),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| format!("Bus {ref_}"));
+                let interval_min = get("interval").and_then(|v| parse_interval(&v));
+                raw_routes.push(RawRoute { ref_, name, interval_min, stops });
+            }
         }
     }
-    build(&nodes, raw_stops, &ways, &areas)
+    build(&nodes, raw_stops, raw_routes, &ways, &areas)
 }
 
 #[derive(Deserialize)]
@@ -248,13 +299,43 @@ struct Element {
     lon: Option<f64>,
     nodes: Option<Vec<i64>>,
     tags: Option<HashMap<String, String>>,
+    members: Option<Vec<Member>>,
+}
+
+#[derive(Deserialize)]
+struct Member {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(rename = "ref")]
+    id: i64,
+    #[serde(default)]
+    role: String,
+}
+
+/// Sort key so that "2" < "10" < "10A".
+fn natural_key(s: &str) -> (u32, String) {
+    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+    (digits.parse().unwrap_or(u32::MAX), s.to_string())
+}
+
+/// OSM `interval` tag: "15", "00:15" or "15 min" -> minutes.
+fn parse_interval(v: &str) -> Option<u32> {
+    let v = v.trim();
+    if let Some((h, m)) = v.split_once(':') {
+        let (h, m): (u32, u32) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
+        let total = h * 60 + m;
+        return (total > 0).then_some(total);
+    }
+    let n: u32 = v.split_whitespace().next()?.parse().ok()?;
+    (n > 0 && n <= 240).then_some(n)
 }
 
 /// Load an Overpass API JSON response (as downloaded in-game).
 pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
     let resp: OverpassResponse = serde_json::from_reader(reader)?;
     let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
-    let mut raw_stops: Vec<(String, f64, f64)> = Vec::new();
+    let mut raw_stops: Vec<RawStop> = Vec::new();
+    let mut raw_routes: Vec<RawRoute> = Vec::new();
     let mut ways: Vec<RawWay> = Vec::new();
     let mut areas: Vec<RawArea> = Vec::new();
 
@@ -264,12 +345,15 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
                 if let (Some(lat), Some(lon)) = (el.lat, el.lon) {
                     nodes.insert(el.id, (lat, lon));
                     if let Some(tags) = &el.tags {
-                        if tags.get("highway").map(String::as_str) == Some("bus_stop") {
+                        let is_stop = tags.get("highway").map(String::as_str) == Some("bus_stop")
+                            || (tags.get("public_transport").map(String::as_str) == Some("platform")
+                                && tags.get("bus").map(String::as_str) == Some("yes"));
+                        if is_stop {
                             let name = tags
                                 .get("name")
                                 .cloned()
                                 .unwrap_or_else(|| "Bus stop".to_string());
-                            raw_stops.push((name, lat, lon));
+                            raw_stops.push((el.id, name, lat, lon));
                         }
                     }
                 }
@@ -285,10 +369,35 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
                     }
                 }
             }
+            "relation" => {
+                let (Some(tags), Some(members)) = (el.tags, el.members) else { continue };
+                if tags.get("route").map(String::as_str) != Some("bus") {
+                    continue;
+                }
+                let node_members: Vec<&Member> = members.iter().filter(|m| m.kind == "node").collect();
+                // Prefer platforms (they are the bus stop nodes); else stop positions.
+                let has_platform = node_members.iter().any(|m| m.role.starts_with("platform"));
+                let stops: Vec<i64> = node_members
+                    .iter()
+                    .filter(|m| if has_platform { m.role.starts_with("platform") } else { m.role.starts_with("stop") })
+                    .map(|m| m.id)
+                    .collect();
+                let ref_ = tags.get("ref").cloned().unwrap_or_default();
+                let name = tags
+                    .get("name")
+                    .cloned()
+                    .or_else(|| match (tags.get("from"), tags.get("to")) {
+                        (Some(f), Some(t)) => Some(format!("{f} → {t}")),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| format!("Bus {ref_}"));
+                let interval_min = tags.get("interval").and_then(|v| parse_interval(v));
+                raw_routes.push(RawRoute { ref_, name, interval_min, stops });
+            }
             _ => {}
         }
     }
-    build(&nodes, raw_stops, &ways, &areas)
+    build(&nodes, raw_stops, raw_routes, &ways, &areas)
 }
 
 fn cell_of(p: Vec2) -> (i32, i32) {
@@ -297,7 +406,8 @@ fn cell_of(p: Vec2) -> (i32, i32) {
 
 fn build(
     nodes: &HashMap<i64, (f64, f64)>,
-    raw_stops: Vec<(String, f64, f64)>,
+    raw_stops: Vec<RawStop>,
+    raw_routes: Vec<RawRoute>,
     ways: &[RawWay],
     raw_areas: &[RawArea],
 ) -> Result<MapData, Box<dyn Error>> {
@@ -381,7 +491,8 @@ fn build(
     }
 
     let mut stops = Vec::new();
-    for (name, lat, lon) in raw_stops {
+    let mut stop_by_osm: HashMap<i64, usize> = HashMap::new();
+    for (osm_id, name, lat, lon) in raw_stops {
         let pos = project(lat, lon);
         let (cx, cy) = cell_of(pos);
 
@@ -409,17 +520,43 @@ fn build(
                 } else {
                     (buildings as f32 / 400.0).clamp(0.3, 3.0)
                 };
-                stops.push(Stop { name, pos: npos, node, demand });
+                stop_by_osm.insert(osm_id, stops.len());
+                stops.push(Stop { osm_id, name, pos: npos, node, demand });
             }
         }
     }
 
-    Ok(MapData { graph, roads, areas, stops })
+    // Resolve real bus routes to stop indices.
+    let mut routes: Vec<BusRoute> = Vec::new();
+    for r in raw_routes {
+        let mut idx: Vec<usize> = Vec::new();
+        for id in &r.stops {
+            if let Some(&i) = stop_by_osm.get(id) {
+                if idx.last() != Some(&i) {
+                    idx.push(i);
+                }
+            }
+        }
+        if idx.len() >= 2 {
+            routes.push(BusRoute { ref_: r.ref_, name: r.name, stops: idx, interval_min: r.interval_min });
+        }
+    }
+    routes.sort_by(|a, b| natural_key(&a.ref_).cmp(&natural_key(&b.ref_)).then(a.name.cmp(&b.name)));
+
+    Ok(MapData { graph, roads, areas, stops, routes })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interval_tag_formats() {
+        assert_eq!(parse_interval("15"), Some(15));
+        assert_eq!(parse_interval("00:30"), Some(30));
+        assert_eq!(parse_interval("10 min"), Some(10));
+        assert_eq!(parse_interval("abc"), None);
+    }
 
     #[test]
     fn parses_overpass_and_routes_a_loop() {
@@ -435,10 +572,19 @@ mod tests {
             {"type":"node","id":3,"lat":33.0020,"lon":-7.0000,"tags":{"highway":"bus_stop","name":"B"}},
             {"type":"node","id":1,"lat":33.0000,"lon":-7.0000},
             {"type":"node","id":2,"lat":33.0010,"lon":-7.0000},
-            {"type":"node","id":3,"lat":33.0020,"lon":-7.0000}
+            {"type":"node","id":3,"lat":33.0020,"lon":-7.0000},
+            {"type":"relation","id":99,"members":[
+                {"type":"node","ref":1,"role":"platform"},
+                {"type":"way","ref":10,"role":""},
+                {"type":"node","ref":3,"role":"platform"}
+            ],"tags":{"route":"bus","ref":"7","from":"A","to":"B","interval":"00:20"}}
         ]}"#;
         let map = load_overpass(json.as_bytes()).expect("parse");
         assert_eq!(map.stops.len(), 2);
+        assert_eq!(map.routes.len(), 1);
+        assert_eq!(map.routes[0].ref_, "7");
+        assert_eq!(map.routes[0].stops, vec![0, 1]);
+        assert_eq!(map.routes[0].interval_min, Some(20));
         assert_eq!(map.roads.len(), 1);
         assert_eq!(map.areas.len(), 2);
         assert_eq!(map.areas[0].kind, AreaKind::Building);

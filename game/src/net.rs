@@ -58,8 +58,15 @@ pub fn search_places(query: &str) -> Result<Vec<Place>, String> {
         .collect())
 }
 
+/// Current cache format is v3 (adds bus route relations). Older v2 files still load, without real routes.
 fn data_path(place: &Place) -> PathBuf {
-    cache_dir().join(format!("city_{}_v2.json", place.osm_id))
+    let v3 = cache_dir().join(format!("city_{}_v3.json", place.osm_id));
+    let v2 = cache_dir().join(format!("city_{}_v2.json", place.osm_id));
+    if !v3.exists() && v2.exists() {
+        v2
+    } else {
+        v3
+    }
 }
 
 fn meta_path(place: &Place) -> PathBuf {
@@ -108,6 +115,8 @@ fn overpass_query(area_id: i64) -> String {
          (\
          way[\"highway\"~\"^({})$\"](area.a);\
          node[\"highway\"=\"bus_stop\"](area.a);\
+         node[\"public_transport\"=\"platform\"][\"bus\"=\"yes\"](area.a);\
+         rel[\"route\"=\"bus\"](area.a);\
          way[\"building\"](area.a);\
          way[\"natural\"~\"^(water|wood|scrub|grassland)$\"](area.a);\
          way[\"waterway\"=\"riverbank\"](area.a);\

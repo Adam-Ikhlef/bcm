@@ -64,6 +64,15 @@ pub enum Action {
     AddStop(usize),
     DraftRemove(usize),
     Undo,
+    OpenTimetable(usize),
+    CloseTimetable,
+    TtFirst(i32),
+    TtLast(i32),
+    TtInterval(i32),
+    Hire(u32),
+    Fire(u32),
+    AdoptRoute(usize),
+    RoutePage(i32),
 }
 
 #[derive(Event)]
@@ -215,6 +224,7 @@ pub enum Stat {
     Riders,
     Waiting,
     Buses,
+    Clock,
 }
 
 #[derive(Component)]
@@ -276,12 +286,14 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             stat(f, "RIDERS CARRIED", Stat::Riders),
             stat(f, "WAITING", Stat::Waiting),
             stat(f, "BUSES", Stat::Buses),
+            stat(f, "TIME", Stat::Clock),
             Node { flex_grow: 1.0, ..default() },
             (
                 Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() },
                 children![
                     button(f, "Map", Action::SetView(View::Map), BtnKind::Toggle),
                     button(f, "Depot", Action::SetView(View::Depot), BtnKind::Toggle),
+                    button(f, "Staff", Action::SetView(View::Staff), BtnKind::Toggle),
                     Node { width: Val::Px(10.0), ..default() },
                     button(f, "Pause", Action::Pause, BtnKind::Toggle),
                     button(f, "1x", Action::Speed(1), BtnKind::Toggle),
@@ -302,7 +314,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             position_type: PositionType::Absolute,
             top: Val::Px(76.0),
             right: Val::Px(14.0),
-            width: Val::Px(280.0),
+            width: Val::Px(330.0),
             flex_direction: FlexDirection::Column,
             padding: UiRect::all(Val::Px(14.0)),
             row_gap: Val::Px(10.0),
@@ -415,6 +427,7 @@ pub fn update_stats(
     queues: Res<StopQueues>,
     fleet: Res<Fleet>,
     buses: Query<&Bus>,
+    clock: Res<crate::ops::GameClock>,
     mut q: Query<(&StatText, &mut Text, &mut TextColor)>,
 ) {
     let waiting: f32 = queues.waiting.iter().map(|w| w.floor()).sum();
@@ -427,6 +440,7 @@ pub fn update_stats(
             Stat::Riders => (group_digits(eco.boarded as i64), style::TEXT),
             Stat::Waiting => (format!("{}", waiting as i64), style::TEXT),
             Stat::Buses => (format!("{bus_count} / {}", fleet.buses.len()), style::TEXT),
+            Stat::Clock => (clock.label(), style::TEXT),
         };
         if t.0 != s {
             t.0 = s;
@@ -441,12 +455,13 @@ pub fn update_lines_panel(
     mut commands: Commands,
     fonts: Res<UiFonts>,
     lines: Res<Lines>,
+    fleet: Res<Fleet>,
     real: Res<Time<Real>>,
     mut timer: Local<f32>,
     list: Single<Entity, With<LinesList>>,
 ) {
     *timer += real.delta_secs();
-    if !lines.is_changed() && *timer < 1.0 && *timer > 0.0 && !fonts.is_changed() {
+    if !lines.is_changed() && !fleet.is_changed() && *timer < 1.0 && *timer > 0.0 && !fonts.is_changed() {
         // Rebuild only on changes or once a second (for the profit numbers).
         return;
     }
@@ -468,32 +483,35 @@ pub fn update_lines_panel(
         for (i, line) in lines.0.iter().enumerate() {
             let profit = line.income - line.cost;
             let profit_color = if profit < 0.0 { style::DANGER } else { style::ACCENT };
+            let assigned = fleet.assigned_count(i);
+            let running = fleet.running_count(i);
             p.spawn((
                 Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() },
                 children![
                     (
-                        Node { width: Val::Px(10.0), height: Val::Px(34.0), ..default() },
+                        Node { width: Val::Px(10.0), height: Val::Px(58.0), ..default() },
                         BackgroundColor(line.color),
                         BorderRadius::all(Val::Px(5.0)),
                     ),
                     (
-                        Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() },
+                        Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: Val::Px(2.0), ..default() },
                         children![
-                            text(f, true, 14.0, style::TEXT, format!("Line {}", i + 1)),
+                            text(f, true, 14.0, style::TEXT, line.name.clone()),
                             text(
                                 f,
                                 false,
                                 12.0,
                                 profit_color,
-                                format!("{} bus{} · {}", line.buses, if line.buses == 1 { "" } else { "es" }, fmt_signed(profit))
+                                format!("{assigned} bus{} ({running} out) · {}", if assigned == 1 { "" } else { "es" }, fmt_signed(profit))
                             ),
-                        ]
-                    ),
-                    (
-                        Node { column_gap: Val::Px(4.0), ..default() },
-                        children![
-                            button(f, "–", Action::RemoveBus(i), BtnKind::Small),
-                            button(f, "+ Bus", Action::AddBus(i), BtnKind::Small),
+                            (
+                                Node { column_gap: Val::Px(4.0), margin: UiRect::top(Val::Px(3.0)), ..default() },
+                                children![
+                                    button(f, "Timetable", Action::OpenTimetable(i), BtnKind::Small),
+                                    button(f, "–", Action::RemoveBus(i), BtnKind::Small),
+                                    button(f, "+ Bus", Action::AddBus(i), BtnKind::Small),
+                                ]
+                            ),
                         ]
                     ),
                 ],

@@ -1,11 +1,14 @@
 mod busmodel;
+mod dispatch;
 mod depot;
 mod fleet;
 mod menu;
 mod net;
+mod ops;
 mod osm;
 mod planner;
 mod render;
+mod staffui;
 mod style;
 mod ui;
 
@@ -18,7 +21,10 @@ use bevy::{
     window::PrimaryWindow,
 };
 use depot::{MapCamera, View};
+pub use dispatch::Bus;
+use dispatch::Phase;
 use fleet::{BusSpec, Catalog, Fleet};
+use ops::{DepotSite, GameClock, Staff, Timetable, Trips};
 use osm::{MapData, Route};
 use ui::{Action, UiAction};
 pub use planner::Draft;
@@ -54,9 +60,14 @@ pub enum Tool {
 pub struct GameWorld;
 
 pub struct BusLine {
+    pub name: String,
     pub route: Arc<Route>,
     pub color: Color,
-    pub buses: usize,
+    pub timetable: Timetable,
+    /// Road path depot -> first stop and back (None when the road network does not connect them).
+    pub depot_leg: Option<Vec<Vec2>>,
+    pub home_leg: Option<Vec<Vec2>>,
+    pub depot_len: f32,
     pub income: f64,
     pub cost: f64,
 }
@@ -102,20 +113,6 @@ impl Economy {
 #[derive(Resource, Default)]
 pub struct StopQueues {
     pub waiting: Vec<f32>,
-}
-
-#[derive(Component)]
-pub struct Bus {
-    route: Arc<Route>,
-    line: usize,
-    fleet: u32,
-    next: usize,
-    load: f32,
-    dwell: f32,
-    capacity: f32,
-    run_cost: f64,
-    fuel_per_m: f32,
-    wear_per_m: f32,
 }
 
 pub fn palette(i: usize) -> Color {
@@ -185,6 +182,8 @@ fn main() {
     .init_resource::<Draft>()
     .init_resource::<planner::Preview>()
     .init_resource::<planner::Search>()
+    .init_resource::<planner::DraftMeta>()
+    .init_resource::<staffui::TimetableUi>()
     .init_resource::<Economy>()
     .init_resource::<StopQueues>()
     .init_resource::<Hover>()
@@ -239,6 +238,7 @@ fn main() {
                 ui::spawn_game_ui,
                 planner::spawn_planner_ui,
                 depot::spawn_depot_ui,
+                staffui::spawn_staff_ui,
             )
                 .chain(),
         )
@@ -269,6 +269,7 @@ fn main() {
                     depot::update_depot_hover,
                     depot::depot_pick,
                     depot::sync_depot_buses,
+                    depot::animate_departures,
                     depot::sync_cards,
                     depot::update_cards,
                     depot::update_selection_marker,
@@ -282,10 +283,21 @@ fn main() {
                 planner::planner_actions,
                 planner::search_input,
                 planner::planner_background,
-                spawn_passengers,
-                move_buses,
+                (
+                    dispatch::tick_clock,
+                    dispatch::daily_rollover,
+                    dispatch::dispatch_trips,
+                    dispatch::advance_departures,
+                    dispatch::layover_manager,
+                    spawn_passengers,
+                    move_buses,
+                )
+                    .chain(),
                 ui::update_stats,
                 ui::update_lines_panel,
+                staffui::staff_actions,
+                staffui::rebuild_staff,
+                staffui::rebuild_timetable,
                 ui::update_toast,
             )
                 .chain()
@@ -311,6 +323,37 @@ fn init_game(
     commands.insert_resource(View::Map);
     commands.insert_resource(depot::Selected::default());
     commands.insert_resource(depot::DepotHover::default());
+    // Developer/test option: BUSMANAGER_CLOCK=05:50 starts the game at that time.
+    let mut clock = GameClock::default();
+    if let Some((h, mi)) = std::env::var("BUSMANAGER_CLOCK").ok().as_deref().and_then(|v| v.split_once(':')) {
+        if let (Ok(h), Ok(mi)) = (h.parse::<u32>(), mi.parse::<u32>()) {
+            clock.abs = (h * 60 + mi) as f64;
+        }
+    }
+    commands.insert_resource(clock);
+    commands.insert_resource(Trips::default());
+
+    // The depot sits at a road node near the middle of the stops.
+    let centroid = map.stops.iter().map(|s| s.pos).sum::<Vec2>() / map.stops.len().max(1) as f32;
+    let site = map
+        .stops
+        .iter()
+        .min_by(|a, b| a.pos.distance_squared(centroid).total_cmp(&b.pos.distance_squared(centroid)))
+        .map(|s| DepotSite { node: s.node, pos: s.pos })
+        .or_else(|| {
+            map.nearest_node(centroid, f32::MAX).map(|(node, pos)| DepotSite { node, pos })
+        })
+        .expect("map has no roads");
+    commands.insert_resource(site);
+
+    // Starting staff: two early drivers and one late driver, plus today's candidates.
+    let mut staff = Staff::default();
+    for (k, shift) in [ops::Shift::Early, ops::Shift::Early, ops::Shift::Late].into_iter().enumerate() {
+        let d = staff.make_driver(1000 + k as u64, shift);
+        staff.drivers.push(d);
+    }
+    staff.refresh_candidates(0);
+    commands.insert_resource(staff);
 
     // Starting fleet: a few standard city buses (the first catalog entry).
     let mut fleet = Fleet::default();
@@ -476,94 +519,53 @@ fn hotkeys(
     }
 }
 
-/// Spawns the map sprite of a bus driving on a line.
 /// Developer/test option: `BUSMANAGER_WEAR=50` makes buses wear out 50x faster.
-fn wear_multiplier() -> f32 {
+pub fn wear_multiplier() -> f32 {
     static M: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *M.get_or_init(|| std::env::var("BUSMANAGER_WEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0))
 }
 
-fn spawn_bus(
-    commands: &mut Commands,
-    route: &Arc<Route>,
-    line: usize,
-    start: usize,
-    color: Color,
-    fleet_id: u32,
-    spec: &BusSpec,
-) {
-    let len = route.path.len();
-    commands.spawn((
-        Bus {
-            route: route.clone(),
-            line,
-            fleet: fleet_id,
-            next: (start + 1) % len,
-            load: 0.0,
-            dwell: 0.0,
-            capacity: spec.capacity,
-            run_cost: spec.run_cost,
-            fuel_per_m: spec.fuel_per_km / 1000.0 * wear_multiplier(),
-            wear_per_m: spec.wear_per_km / 1000.0 * wear_multiplier(),
-        },
-        Sprite::from_color(color, Vec2::new(spec.length * 2.1, 10.0)),
-        Transform::from_translation(route.path[start].extend(4.0)),
-        GameWorld,
-        children![(
-            Sprite::from_color(Color::WHITE, Vec2::new(spec.length * 2.1 + 5.0, 15.0)),
-            Transform::from_xyz(0.0, 0.0, -0.1),
-        )],
-    ));
-}
-
-/// Sends the first parked, roadworthy bus to a line. Returns false if none is available.
-fn assign_bus(commands: &mut Commands, fleet: &mut Fleet, catalog: &Catalog, lines: &mut Lines, line_idx: usize) -> bool {
-    let Some(id) = fleet.idle_operational() else {
+/// Assigns the first free, roadworthy bus to a line. It leaves the depot for the line's departures.
+fn assign_bus(fleet: &mut Fleet, line_idx: usize) -> bool {
+    let Some(id) = fleet.unassigned_operational() else {
         return false;
     };
-    let Some(line) = lines.0.get_mut(line_idx) else {
-        return false;
-    };
-    let spec_idx = fleet.get(id).map(|b| b.spec).unwrap_or(0);
-    let spec = &catalog.0[spec_idx];
-    let start = (line.buses * 37) % line.route.path.len();
     if let Some(b) = fleet.get_mut(id) {
-        b.line = Some(line_idx);
-        b.bay = None;
+        b.assigned = Some(line_idx);
     }
     fleet.version += 1;
-    line.buses += 1;
-    spawn_bus(commands, &line.route, line_idx, start, line.color, id, spec);
     true
 }
 
 #[allow(clippy::too_many_arguments)]
 fn game_actions(
     mut events: EventReader<UiAction>,
-    mut commands: Commands,
     map: Res<MapData>,
-    catalog: Res<Catalog>,
+    depot: Res<DepotSite>,
     real: Res<Time<Real>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut tool: ResMut<Tool>,
     mut draft: ResMut<Draft>,
+    mut meta: ResMut<planner::DraftMeta>,
     mut lines: ResMut<Lines>,
     mut fleet: ResMut<Fleet>,
     mut eco: ResMut<Economy>,
     mut next: ResMut<NextState<AppState>>,
-    buses: Query<(Entity, &Bus)>,
+    mut buses: Query<&mut Bus>,
 ) {
     for UiAction(action) in events.read() {
         match *action {
             Action::NewLine => {
                 *tool = Tool::Drawing;
                 draft.0.clear();
+                *meta = planner::DraftMeta::default();
                 eco.say(&real, "Click bus stops in the order buses should serve them");
             }
             Action::Cancel => {
                 if *tool == Tool::Drawing {
                     *tool = Tool::Idle;
                     draft.0.clear();
+                    *meta = planner::DraftMeta::default();
                 }
             }
             Action::Finish => {
@@ -574,50 +576,79 @@ fn game_actions(
                     eco.say(&real, "Select at least 2 stops first");
                     continue;
                 }
-                match map.route_through(&draft.items(&map)) {
+                let items = draft.items(&map);
+                match map.route_through(&items) {
                     Some(route) if route.path.len() >= 2 => {
                         let idx = lines.0.len();
+                        let first = items[0].0;
+                        let depot_leg = map.leg(depot.node, first);
+                        let home_leg = map.leg(first, depot.node);
+                        let depot_len = depot_leg
+                            .as_ref()
+                            .map(|p| p.windows(2).map(|w| w[0].distance(w[1])).sum())
+                            .unwrap_or(0.0);
+                        let mut timetable = Timetable::default();
+                        if let Some(iv) = meta.interval {
+                            timetable.interval = iv.clamp(5, 60);
+                        }
+                        let name = meta.name.take().unwrap_or_else(|| format!("Line {}", idx + 1));
                         lines.0.push(BusLine {
+                            name: name.clone(),
                             route: Arc::new(route),
                             color: palette(idx),
-                            buses: 0,
+                            timetable,
+                            depot_leg,
+                            home_leg,
+                            depot_len,
                             income: 0.0,
                             cost: 0.0,
                         });
-                        // Start the line with up to two parked buses.
+                        // Start the line with up to two buses from the depot.
                         let mut sent = 0;
                         for _ in 0..2 {
-                            if assign_bus(&mut commands, &mut fleet, &catalog, &mut lines, idx) {
+                            if assign_bus(&mut fleet, idx) {
                                 sent += 1;
                             }
                         }
                         let note = if sent == 0 {
                             "no free bus: buy one in the Depot, then press “+ Bus”"
                         } else {
-                            "more buses: “+ Bus” in the Lines panel"
+                            "set its timetable with “Timetable” in the Lines panel"
                         };
-                        eco.say(&real, format!("Line {} opened with {sent} bus{} · {note}", idx + 1, if sent == 1 { "" } else { "es" }));
+                        eco.say(&real, format!("{name} opened with {sent} bus{} · {note}", if sent == 1 { "" } else { "es" }));
                         draft.0.clear();
+                        *meta = planner::DraftMeta::default();
                         *tool = Tool::Idle;
                     }
                     _ => eco.say(&real, "No road connects these stops (one-way streets or separate road networks)"),
                 }
             }
             Action::AddBus(i) => {
-                if assign_bus(&mut commands, &mut fleet, &catalog, &mut lines, i) {
-                    eco.say(&real, format!("Bus assigned to line {}", i + 1));
+                if i < lines.0.len() && assign_bus(&mut fleet, i) {
+                    eco.say(&real, format!("Bus assigned to {}", lines.0[i].name));
                 } else {
                     eco.say(&real, "No free bus in the depot: buy or service one in the Depot view");
                 }
             }
             Action::RemoveBus(i) => {
-                if let Some((e, b)) = buses.iter().find(|(_, b)| b.line == i) {
-                    commands.entity(e).despawn();
-                    fleet.park(b.fleet);
-                    if let Some(line) = lines.0.get_mut(i) {
-                        line.buses = line.buses.saturating_sub(1);
+                // Prefer a bus that is waiting in the depot; otherwise the running one goes home after its loop.
+                let pick = fleet
+                    .buses
+                    .iter()
+                    .filter(|b| b.assigned == Some(i))
+                    .max_by_key(|b| (b.line.is_none() && b.depart.is_none()) as u8)
+                    .map(|b| (b.id, b.line.is_none() && b.depart.is_none()));
+                if let Some((id, parked)) = pick {
+                    if let Some(b) = fleet.get_mut(id) {
+                        b.assigned = None;
                     }
-                    eco.say(&real, format!("Bus returned to the depot from line {}", i + 1));
+                    fleet.version += 1;
+                    if !parked {
+                        for mut bus in buses.iter_mut().filter(|b| b.fleet == id) {
+                            bus.retire = true;
+                        }
+                    }
+                    eco.say(&real, format!("Bus taken off {}", lines.0.get(i).map(|l| l.name.as_str()).unwrap_or("the line")));
                 }
             }
             Action::Pause => {
@@ -639,13 +670,40 @@ fn game_actions(
     }
 }
 
-fn spawn_passengers(time: Res<Time>, map: Res<MapData>, mut queues: ResMut<StopQueues>) {
+fn spawn_passengers(time: Res<Time>, clock: Res<GameClock>, map: Res<MapData>, mut queues: ResMut<StopQueues>) {
     let dt = time.delta_secs();
+    let tod = ops::demand_factor(clock.minute_of_day());
     for (i, s) in map.stops.iter().enumerate() {
         if let Some(w) = queues.waiting.get_mut(i) {
-            *w = (*w + s.demand * PASSENGER_RATE * dt).min(MAX_WAITING);
+            *w = (*w + s.demand * PASSENGER_RATE * tod * dt).min(MAX_WAITING);
         }
     }
+}
+
+/// Moves `pos` along `path` (from index `pi`) by up to `remaining` meters. Returns the distance driven.
+fn follow(tf: &mut Transform, path: &[Vec2], pi: &mut usize, remaining: &mut f32) -> f32 {
+    let mut traveled = 0.0;
+    while *remaining > 0.0 && *pi < path.len() {
+        let pos = tf.translation.truncate();
+        let to = path[*pi] - pos;
+        let d = to.length();
+        if d <= *remaining {
+            tf.translation = path[*pi].extend(4.0);
+            *remaining -= d;
+            traveled += d;
+            *pi += 1;
+            if d > 1e-3 {
+                tf.rotation = Quat::from_rotation_z(to.y.atan2(to.x));
+            }
+        } else {
+            let dir = to / d;
+            tf.translation += (dir * *remaining).extend(0.0);
+            tf.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+            traveled += *remaining;
+            *remaining = 0.0;
+        }
+    }
+    traveled
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -653,90 +711,157 @@ fn move_buses(
     mut commands: Commands,
     time: Res<Time>,
     real: Res<Time<Real>>,
+    clock: Res<GameClock>,
+    map: Res<MapData>,
+    depot: Res<DepotSite>,
     mut queues: ResMut<StopQueues>,
     mut eco: ResMut<Economy>,
     mut lines: ResMut<Lines>,
     mut fleet: ResMut<Fleet>,
+    mut staff: ResMut<Staff>,
     mut buses: Query<(Entity, &mut Bus, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut bus, mut tf) in &mut buses {
-        if bus.dwell > 0.0 {
-            bus.dwell -= dt;
-            continue;
-        }
-
-        let mut remaining = BUS_SPEED * dt;
         let mut traveled = 0.0f32;
         let mut earned = 0.0f64;
         let mut boarded_now = 0.0f32;
-        for _ in 0..64 {
-            if remaining <= 0.0 {
-                break;
+        let mut arrived_home = false;
+
+        match bus.phase {
+            Phase::Layover => {}
+            Phase::Wait => {
+                if clock.abs >= bus.wait_until {
+                    // Doors open at the first stop; the line starts.
+                    bus.phase = Phase::Running;
+                    bus.next = 1 % bus.route.path.len();
+                    if let Some(si) = bus.route.stop_at[0] {
+                        bus.load *= 0.6;
+                        let space = (bus.capacity - bus.load).floor().max(0.0);
+                        let board = queues.waiting[si].floor().min(space);
+                        queues.waiting[si] -= board;
+                        bus.load += board;
+                        earned += board as f64 * FARE;
+                        eco.boarded += board as u64;
+                        boarded_now += board;
+                    }
+                }
             }
-            let pos = tf.translation.truncate();
-            let idx = bus.next;
-            let target = bus.route.path[idx];
-            let to = target - pos;
-            let d = to.length();
-
-            if d <= remaining {
-                tf.translation = target.extend(4.0);
-                remaining -= d;
-                traveled += d;
-                bus.next = (idx + 1) % bus.route.path.len();
-                if d > 1e-3 {
-                    tf.rotation = Quat::from_rotation_z(to.y.atan2(to.x));
+            Phase::Approach => {
+                let mut remaining = BUS_SPEED * dt;
+                let b = &mut *bus;
+                traveled += follow(&mut tf, &b.path, &mut b.pi, &mut remaining);
+                if b.pi >= b.path.len() {
+                    b.phase = Phase::Wait;
+                    tf.translation = b.route.path[0].extend(4.0);
                 }
-
-                // Reached a stop: some riders get off, waiting passengers board and pay.
-                if let Some(si) = bus.route.stop_at[idx] {
-                    bus.load *= 0.6;
-                    let space = (bus.capacity - bus.load).floor().max(0.0);
-                    let board = queues.waiting[si].floor().min(space);
-                    queues.waiting[si] -= board;
-                    bus.load += board;
-                    earned += board as f64 * FARE;
-                    eco.boarded += board as u64;
-                    boarded_now += board;
-                    bus.dwell = DWELL_SECONDS;
-                    break;
+            }
+            Phase::Returning => {
+                let mut remaining = BUS_SPEED * dt;
+                let b = &mut *bus;
+                traveled += follow(&mut tf, &b.path, &mut b.pi, &mut remaining);
+                arrived_home = b.pi >= b.path.len();
+            }
+            Phase::Running => {
+                if bus.dwell > 0.0 {
+                    bus.dwell -= dt;
+                    continue;
                 }
-            } else {
-                let dir = to / d;
-                tf.translation += (dir * remaining).extend(0.0);
-                tf.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
-                traveled += remaining;
-                remaining = 0.0;
+                let mut remaining = BUS_SPEED * dt;
+                for _ in 0..64 {
+                    if remaining <= 0.0 {
+                        break;
+                    }
+                    let pos = tf.translation.truncate();
+                    let idx = bus.next;
+                    let target = bus.route.path[idx];
+                    let to = target - pos;
+                    let d = to.length();
+
+                    if d <= remaining {
+                        tf.translation = target.extend(4.0);
+                        remaining -= d;
+                        traveled += d;
+                        bus.next = (idx + 1) % bus.route.path.len();
+                        if d > 1e-3 {
+                            tf.rotation = Quat::from_rotation_z(to.y.atan2(to.x));
+                        }
+
+                        // Reached a stop: some riders get off, waiting passengers board and pay.
+                        if let Some(si) = bus.route.stop_at[idx] {
+                            bus.load *= 0.6;
+                            let space = (bus.capacity - bus.load).floor().max(0.0);
+                            let board = queues.waiting[si].floor().min(space);
+                            queues.waiting[si] -= board;
+                            bus.load += board;
+                            earned += board as f64 * FARE;
+                            eco.boarded += board as u64;
+                            boarded_now += board;
+                            bus.dwell = DWELL_SECONDS;
+                        }
+                        // Back at the first stop: the loop is complete.
+                        if idx == 0 {
+                            bus.phase = Phase::Layover;
+                            bus.since = clock.abs;
+                            bus.load = 0.0;
+                            break;
+                        }
+                        if bus.dwell > 0.0 {
+                            break;
+                        }
+                    } else {
+                        let dir = to / d;
+                        tf.translation += (dir * remaining).extend(0.0);
+                        tf.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+                        traveled += remaining;
+                        remaining = 0.0;
+                    }
+                }
             }
         }
 
         let cost = traveled as f64 * bus.run_cost;
-        eco.money += earned - cost;
-        eco.income += earned;
-        eco.costs += cost;
-        if let Some(line) = lines.0.get_mut(bus.line) {
-            line.income += earned;
-            line.cost += cost;
+        if cost != 0.0 || earned != 0.0 {
+            eco.money += earned - cost;
+            eco.income += earned;
+            eco.costs += cost;
+            if let Some(line) = lines.0.get_mut(bus.line) {
+                line.income += earned;
+                line.cost += cost;
+            }
         }
 
         // Wear: fuel, condition and cleanliness. A worn-out bus goes back to the depot for service.
         let mut worn_out = false;
         if let Some(fb) = fleet.get_mut(bus.fleet) {
-            fb.fuel = (fb.fuel - traveled * bus.fuel_per_m).max(0.0);
-            fb.condition = (fb.condition - traveled * bus.wear_per_m).max(0.0);
-            fb.clean = (fb.clean - boarded_now * CLEAN_LOSS_PER_RIDER).max(0.0);
+            if traveled > 0.0 || boarded_now > 0.0 {
+                fb.fuel = (fb.fuel - traveled * bus.fuel_per_m).max(0.0);
+                fb.condition = (fb.condition - traveled * bus.wear_per_m).max(0.0);
+                fb.clean = (fb.clean - boarded_now * CLEAN_LOSS_PER_RIDER).max(0.0);
+            }
             worn_out = fb.needs_service();
         }
-        if worn_out {
-            let (fid, line_idx) = (bus.fleet, bus.line);
+        if worn_out && !bus.retire && bus.phase != Phase::Returning {
+            bus.retire = true;
+            let plate = fleet.get(bus.fleet).map(|b| b.plate.clone()).unwrap_or_default();
+            eco.say(&real, format!("{plate} needs service and is returning to the depot"));
+            if matches!(bus.phase, Phase::Running | Phase::Approach | Phase::Wait) {
+                let pos = tf.translation.truncate();
+                let home = lines.0.get(bus.line).and_then(|l| l.home_leg.clone());
+                if !dispatch::start_return(&mut bus, pos, &map, &depot, home.as_ref()) {
+                    arrived_home = true;
+                }
+            }
+        }
+
+        if arrived_home {
+            let (fid, did) = (bus.fleet, bus.driver);
             commands.entity(entity).despawn();
             fleet.park(fid);
-            if let Some(line) = lines.0.get_mut(line_idx) {
-                line.buses = line.buses.saturating_sub(1);
+            if let Some(d) = staff.get_mut(did) {
+                d.bus = None;
             }
-            let plate = fleet.get(fid).map(|b| b.plate.clone()).unwrap_or_default();
-            eco.say(&real, format!("{plate} needs service and returned to the depot"));
+            staff.version += 1;
         }
     }
 }
