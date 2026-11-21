@@ -10,7 +10,7 @@ This notice does not claim that these marks are registered trademarks.
 
 ## Official organization
 
-The official organization is **bcm.yoz-team.online**, available on GitHub as
+The official organization is **busmanager.yoz-team.online**, available on GitHub as
 [`Adam-Ikhlef`](https://github.com/Adam-Ikhlef).
 
 The official source repository is
