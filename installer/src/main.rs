@@ -15,7 +15,7 @@ use eframe::egui;
 
 const REPO: &str = match option_env!("BUSMANAGER_REPO") {
     Some(r) => r,
-    None => "Adam-Ikhlef/busmanager",
+    None => "YOUR_GITHUB_USER/busmanager",
 };
 
 const APP_NAME: &str = "Bus Manager";

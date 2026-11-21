@@ -9,6 +9,8 @@ pub const fn rgb(r: u8, g: u8, b: u8) -> Color {
 // Map
 pub const MAP_BG: Color = rgb(0xcd, 0xeb, 0xb0); // OSM park/grass green
 
+pub const PLAN_BG: Color = rgb(0x9c, 0xd0, 0x80); // deeper green while planning a route
+
 // UI
 pub const PANEL: Color = Color::srgba(1.0, 1.0, 1.0, 0.96);
 pub const PANEL_BORDER: Color = rgb(0xc9, 0xd3, 0xc6);

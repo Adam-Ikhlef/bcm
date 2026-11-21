@@ -138,38 +138,53 @@ pub struct Route {
 }
 
 impl MapData {
+    /// Closest road node to a world position (meters), if within `max_dist`.
+    pub fn nearest_node(&self, pos: Vec2, max_dist: f32) -> Option<(NodeIndex, Vec2)> {
+        self.graph
+            .node_indices()
+            .map(|n| (n, self.graph[n]))
+            .map(|(n, p)| (n, p, p.distance_squared(pos)))
+            .filter(|(_, _, d)| *d <= max_dist * max_dist)
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(n, p, _)| (n, p))
+    }
+
+    /// Shortest road path between two nodes (inclusive), `None` when not connected.
+    pub fn leg(&self, a: NodeIndex, b: NodeIndex) -> Option<Vec<Vec2>> {
+        let goal = self.graph[b];
+        let (_, nodes) = astar(&self.graph, a, |n| n == b, |e| *e.weight(), |n| self.graph[n].distance(goal))?;
+        Some(nodes.into_iter().map(|n| self.graph[n]).collect())
+    }
+
     /// Route a bus through the given stops (indices into `stops`) and back to the first one.
     /// Returns `None` if two stops are not connected by road.
     pub fn route_loop(&self, stops: &[usize]) -> Option<Route> {
+        let items: Vec<(NodeIndex, Option<usize>)> = stops.iter().map(|&s| (self.stops[s].node, Some(s))).collect();
+        self.route_through(&items)
+    }
+
+    /// Route through stops and free waypoints (`None` = waypoint, bus does not stop) and back to the start.
+    pub fn route_through(&self, items: &[(NodeIndex, Option<usize>)]) -> Option<Route> {
         let mut path: Vec<Vec2> = Vec::new();
         let mut stop_at: Vec<Option<usize>> = Vec::new();
 
-        for i in 0..stops.len() {
-            let a_stop = stops[i];
-            let b_stop = stops[(i + 1) % stops.len()];
-            let a = self.stops[a_stop].node;
-            let b = self.stops[b_stop].node;
-            let goal = self.graph[b];
-            let (_, nodes) = astar(
-                &self.graph,
-                a,
-                |n| n == b,
-                |e| *e.weight(),
-                |n| self.graph[n].distance(goal),
-            )?;
+        for i in 0..items.len() {
+            let a = items[i];
+            let b = items[(i + 1) % items.len()];
+            let leg = self.leg(a.0, b.0)?;
 
             let start_idx = if i == 0 { path.len() } else { path.len() - 1 };
-            for (k, n) in nodes.into_iter().enumerate() {
+            for (k, p) in leg.into_iter().enumerate() {
                 if i > 0 && k == 0 {
                     continue; // already the end of the previous segment
                 }
-                path.push(self.graph[n]);
+                path.push(p);
                 stop_at.push(None);
             }
-            stop_at[start_idx] = Some(a_stop);
+            stop_at[start_idx] = a.1;
         }
 
-        // The loop ends back at the first stop: drop the duplicate end point.
+        // The loop ends back at the first item: drop the duplicate end point.
         if path.len() > 1 {
             path.pop();
             stop_at.pop();

@@ -51,6 +51,7 @@ pub enum Action {
     SetView(View),
     SelectBus(u32),
     Buy(usize),
+    ShopTab(crate::fleet::Category),
     Service(u32),
     Sell(u32),
     Pause,
@@ -59,6 +60,10 @@ pub enum Action {
     Search,
     Pick(usize),
     Cached(usize),
+    FocusSearch,
+    AddStop(usize),
+    DraftRemove(usize),
+    Undo,
 }
 
 #[derive(Event)]
@@ -512,8 +517,9 @@ pub fn update_toolbar(
     if draw.display != d {
         draw.display = d;
     }
-    let n = draft.0.len();
-    let s = format!("New line · {n} stop{} selected", if n == 1 { "" } else { "s" });
+    let n = draft.stop_count();
+    let w = draft.0.len() - n;
+    let s = format!("New line · {n} stop{} · {w} waypoint{}", if n == 1 { "" } else { "s" }, if w == 1 { "" } else { "s" });
     if label.0 != s {
         label.0 = s;
     }

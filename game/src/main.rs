@@ -4,6 +4,7 @@ mod fleet;
 mod menu;
 mod net;
 mod osm;
+mod planner;
 mod render;
 mod style;
 mod ui;
@@ -20,13 +21,14 @@ use depot::{MapCamera, View};
 use fleet::{BusSpec, Catalog, Fleet};
 use osm::{MapData, Route};
 use ui::{Action, UiAction};
+pub use planner::Draft;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // --- Economy tuning ---------------------------------------------------------
 const START_MONEY: f64 = 18_000.0;
 const START_BUSES: usize = 3;
-const BUS_SPEED: f32 = 11.0; // m/s
+pub const BUS_SPEED: f32 = 11.0; // m/s
 const FARE: f64 = 1.5;
 const DWELL_SECONDS: f32 = 3.0;
 const PASSENGER_RATE: f32 = 0.12; // passengers per second per unit of stop demand
@@ -61,10 +63,6 @@ pub struct BusLine {
 
 #[derive(Resource, Default)]
 pub struct Lines(pub Vec<BusLine>);
-
-/// Stops (indices into MapData::stops) of the line currently being drawn.
-#[derive(Resource, Default)]
-pub struct Draft(pub Vec<usize>);
 
 #[derive(Resource, Default)]
 pub struct Hover {
@@ -185,6 +183,8 @@ fn main() {
     .insert_resource(Catalog(specs))
     .init_resource::<Lines>()
     .init_resource::<Draft>()
+    .init_resource::<planner::Preview>()
+    .init_resource::<planner::Search>()
     .init_resource::<Economy>()
     .init_resource::<StopQueues>()
     .init_resource::<Hover>()
@@ -193,6 +193,7 @@ fn main() {
     .init_resource::<Fleet>()
     .init_resource::<View>()
     .init_resource::<depot::Selected>()
+    .init_resource::<depot::ShopTab>()
     .init_resource::<depot::DepotHover>()
     .init_resource::<depot::DepotView>()
     .init_resource::<render::RoadLayers>()
@@ -236,6 +237,7 @@ fn main() {
                 render::spawn_stops,
                 depot::spawn_depot_scene,
                 ui::spawn_game_ui,
+                planner::spawn_planner_ui,
                 depot::spawn_depot_ui,
             )
                 .chain(),
@@ -248,7 +250,10 @@ fn main() {
                 (
                     camera_controls,
                     update_hover,
-                    pick_stops,
+                    planner::plan_click,
+                    planner::update_preview,
+                    planner::draw_planner,
+                    planner::rebuild_planner,
                     render::update_roads,
                     render::update_buildings,
                     render::update_stop_icons,
@@ -274,6 +279,9 @@ fn main() {
                 game_actions,
                 depot::depot_actions,
                 hotkeys,
+                planner::planner_actions,
+                planner::search_input,
+                planner::planner_background,
                 spawn_passengers,
                 move_buses,
                 ui::update_stats,
@@ -306,8 +314,9 @@ fn init_game(
 
     // Starting fleet: a few standard city buses (the first catalog entry).
     let mut fleet = Fleet::default();
+    let start_spec = catalog.0.iter().position(|s| s.name == "City Bus 12 m").unwrap_or(0);
     for _ in 0..START_BUSES {
-        fleet.add(0);
+        fleet.add(start_spec);
     }
     debug_assert!(!catalog.0.is_empty());
     commands.insert_resource(fleet);
@@ -352,6 +361,7 @@ fn camera_controls(
     mouse: Res<ButtonInput<MouseButton>>,
     time: Res<Time<Real>>,
     block: Res<UiBlock>,
+    search: Res<planner::Search>,
     mut wheel: EventReader<MouseWheel>,
     mut motion: EventReader<MouseMotion>,
     cam: Single<(&mut Transform, &mut Projection), With<MapCamera>>,
@@ -377,16 +387,17 @@ fn camera_controls(
     }
 
     let mut dir = Vec2::ZERO;
-    if keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp) {
+    let typing = search.focus;
+    if !typing && (keys.pressed(KeyCode::KeyW) || keys.pressed(KeyCode::ArrowUp)) {
         dir.y += 1.0;
     }
-    if keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown) {
+    if !typing && (keys.pressed(KeyCode::KeyS) || keys.pressed(KeyCode::ArrowDown)) {
         dir.y -= 1.0;
     }
-    if keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft) {
+    if !typing && (keys.pressed(KeyCode::KeyA) || keys.pressed(KeyCode::ArrowLeft)) {
         dir.x -= 1.0;
     }
-    if keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight) {
+    if !typing && (keys.pressed(KeyCode::KeyD) || keys.pressed(KeyCode::ArrowRight)) {
         dir.x += 1.0;
     }
     if dir != Vec2::ZERO {
@@ -426,18 +437,16 @@ fn update_hover(
         .map(|(i, _)| i);
 }
 
-fn pick_stops(mouse: Res<ButtonInput<MouseButton>>, tool: Res<Tool>, hover: Res<Hover>, mut draft: ResMut<Draft>) {
-    if *tool != Tool::Drawing || !mouse.just_pressed(MouseButton::Left) {
+fn hotkeys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut events: EventWriter<UiAction>,
+    tool: Res<Tool>,
+    view: Res<View>,
+    search: Res<planner::Search>,
+) {
+    if search.focus {
         return;
     }
-    if let Some(i) = hover.stop {
-        if draft.0.last() != Some(&i) {
-            draft.0.push(i);
-        }
-    }
-}
-
-fn hotkeys(keys: Res<ButtonInput<KeyCode>>, mut events: EventWriter<UiAction>, tool: Res<Tool>, view: Res<View>) {
     if keys.just_pressed(KeyCode::Tab) {
         let to = if *view == View::Map { View::Depot } else { View::Map };
         events.write(UiAction(Action::SetView(to)));
@@ -561,11 +570,11 @@ fn game_actions(
                 if *tool != Tool::Drawing {
                     continue;
                 }
-                if draft.0.len() < 2 {
+                if draft.stop_count() < 2 {
                     eco.say(&real, "Select at least 2 stops first");
                     continue;
                 }
-                match map.route_loop(&draft.0) {
+                match map.route_through(&draft.items(&map)) {
                     Some(route) if route.path.len() >= 2 => {
                         let idx = lines.0.len();
                         lines.0.push(BusLine {

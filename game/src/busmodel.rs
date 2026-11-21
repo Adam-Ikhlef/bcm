@@ -105,7 +105,7 @@ fn segment(p: &mut ChildSpawnerCommands, a: &BusAssets, body: &Handle<StandardMa
     // Doors on the right side
     let doors: &[f32] = if s.len > 9.0 { &[s.len * 0.5 - 1.5, -s.len * 0.12] } else { &[s.len * 0.5 - 1.3] };
     for dz in doors {
-        part(p, &a.cube, &a.door, Vec3::new(w / 2.0 + 0.03, 1.2 + (h - 1.55) / 2.0, s.z + dz), Vec3::new(0.06, h - 1.55, 1.15));
+        part(p, &a.cube, &a.door, Vec3::new(w / 2.0 + 0.03, 1.2 + (h - 1.55).min(1.9) / 2.0, s.z + dz), Vec3::new(0.06, (h - 1.55).min(1.9), 1.15));
     }
 
     if s.front {
@@ -146,9 +146,14 @@ fn builtin(p: &mut ChildSpawnerCommands, a: &BusAssets, body: &Handle<StandardMa
     let half = len / 2.0;
     let axles: Vec<f32>;
     match look {
-        Look::Solo | Look::Mini => {
+        Look::Solo | Look::Mini | Look::Double => {
             segment(p, a, body, &Segment { z: 0.0, len, front: true, rear: true }, w, h);
-            axles = if look == Look::Solo { vec![half - 1.9, -half + 2.4] } else { vec![half - 1.3, -half + 1.4] };
+            if look == Look::Double {
+                // Belt between the decks, roof overhang and a stair window.
+                part(p, &a.cube, body, Vec3::new(0.0, 2.38, 0.0), Vec3::new(w + 0.07, 0.24, len));
+                part(p, &a.cube, &a.white, Vec3::new(0.0, h + 0.02, 0.0), Vec3::new(w + 0.06, 0.06, len + 0.1));
+            }
+            axles = if look != Look::Mini { vec![half - 1.9, -half + 2.4] } else { vec![half - 1.3, -half + 1.4] };
         }
         Look::Articulated => {
             // Front part, flexible joint, rear part.

@@ -1,5 +1,6 @@
 {
   "name": "Double-Decker",
+  "category": "doubledecker",
   "model": "model.glb",
   "length": 10.6,
   "width": 2.55,

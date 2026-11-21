@@ -13,7 +13,7 @@ use bevy::{
 
 use crate::{
     busmodel::{self, BusAssets},
-    fleet::{Catalog, Fleet, BAYS},
+    fleet::{Catalog, Category, Fleet, BAYS},
     style,
     ui::{button, fmt_money, text, Action, BtnKind, GameUi, UiAction, UiFonts},
     Economy, GameWorld, UiBlock,
@@ -248,11 +248,154 @@ pub fn spawn_depot_scene(
         tree(ex, *z, s);
         tree(-ex - 1.5, *z + 4.0, 1.0 + (i % 2) as f32 * 0.2);
     }
-    for x in [-30.0, -14.0, 6.0, 24.0, 40.0] {
-        tree(x, lot_d / 2.0 + 8.0, 1.1);
-    }
     for (x, z) in [(ex - 3.0, -8.0), (ex - 3.5, 9.0), (-ex + 3.0, 18.0), (-ex + 3.2, -18.0), (12.0, lot_d / 2.0 + 3.5)] {
         place(&ball, &bush, Vec3::new(x, 0.55, z), Vec3::new(1.6, 1.1, 1.6));
+    }
+
+    // --- Surroundings: main street, side street, intersection, sidewalks, buildings, lamps ---
+    let street_w = 11.0;
+    let zs = lot_d / 2.0 + 14.0; // main street (runs along X) in front of the depot
+    let xs = lot_w / 2.0 + 26.0; // side street (runs along Z) to the right of the depot
+    let sw = 3.0; // sidewalk width
+    let paving = materials.add(solid(style::rgb(0xb4, 0xb2, 0xa8), 0.9));
+    let road = materials.add(solid(style::rgb(0x55, 0x58, 0x5e), 0.92));
+    let paint = materials.add(solid(style::rgb(0xe9, 0xe6, 0xd6), 0.8));
+    let yellow = materials.add(solid(style::rgb(0xe8, 0xc5, 0x3a), 0.8));
+    let lamp_mat = materials.add(solid(style::rgb(0x3b, 0x40, 0x46), 0.6));
+    let lamp_glow = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.95, 0.75),
+        emissive: LinearRgba::rgb(2.0, 1.8, 1.2),
+        ..default()
+    });
+    let win = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.30, 0.43, 0.55),
+        perceptual_roughness: 0.2,
+        ..default()
+    });
+    let win_lit = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.98, 0.86, 0.5),
+        emissive: LinearRgba::rgb(0.6, 0.5, 0.2),
+        ..default()
+    });
+    let walls = [
+        materials.add(solid(style::rgb(0xe3, 0xd5, 0xb8), 0.9)),
+        materials.add(solid(style::rgb(0xcf, 0x9a, 0x7e), 0.9)),
+        materials.add(solid(style::rgb(0xd9, 0xdc, 0xdf), 0.9)),
+        materials.add(solid(style::rgb(0xb7, 0xc4, 0xa6), 0.9)),
+        materials.add(solid(style::rgb(0xc9, 0xb1, 0x8a), 0.9)),
+    ];
+    let roofs = [
+        materials.add(solid(style::rgb(0x8a, 0x4b, 0x3c), 0.8)),
+        materials.add(solid(style::rgb(0x5b, 0x60, 0x68), 0.8)),
+    ];
+    let reach = 125.0;
+
+    // Sidewalks first (slightly higher), then asphalt on top where roads cross them.
+    place(&cube, &paving, Vec3::new(0.0, 0.03, zs), Vec3::new(2.0 * reach, 0.16, street_w + 2.0 * sw));
+    place(&cube, &paving, Vec3::new(xs, 0.03, 0.0), Vec3::new(street_w + 2.0 * sw, 0.16, 2.0 * reach));
+    place(&cube, &road, Vec3::new(0.0, 0.07, zs), Vec3::new(2.0 * reach, 0.16, street_w));
+    place(&cube, &road, Vec3::new(xs, 0.07, 0.0), Vec3::new(street_w, 0.16, 2.0 * reach));
+    // Depot driveway
+    place(&cube, &road, Vec3::new(0.0, 0.06, (lot_d / 2.0 + zs - street_w / 2.0) / 2.0), Vec3::new(14.0, 0.16, zs - street_w / 2.0 - lot_d / 2.0 + 0.2));
+    // Lane markings (dashed), skipped inside the intersection
+    let mut x = -reach + 3.0;
+    while x < reach - 3.0 {
+        if (x - xs).abs() > street_w / 2.0 + 6.5 {
+            place(&cube, &paint, Vec3::new(x, 0.16, zs), Vec3::new(3.0, 0.02, 0.2));
+        }
+        x += 7.0;
+    }
+    let mut z = -reach + 3.0;
+    while z < reach - 3.0 {
+        if (z - zs).abs() > street_w / 2.0 + 6.5 {
+            place(&cube, &paint, Vec3::new(xs, 0.16, z), Vec3::new(0.2, 0.02, 3.0));
+        }
+        z += 7.0;
+    }
+    // Crosswalks on every arm of the intersection
+    for i in 0..6 {
+        let o = (i as f32 - 2.5) * 1.6;
+        let reach_c = street_w / 2.0 + 2.5;
+        place(&cube, &paint, Vec3::new(xs + o, 0.17, zs - reach_c), Vec3::new(0.9, 0.02, 3.0));
+        place(&cube, &paint, Vec3::new(xs + o, 0.17, zs + reach_c), Vec3::new(0.9, 0.02, 3.0));
+        place(&cube, &paint, Vec3::new(xs - reach_c, 0.17, zs + o), Vec3::new(3.0, 0.02, 0.9));
+        place(&cube, &paint, Vec3::new(xs + reach_c, 0.17, zs + o), Vec3::new(3.0, 0.02, 0.9));
+    }
+    // Stop lines
+    place(&cube, &paint, Vec3::new(xs - street_w / 2.0 - 5.2, 0.17, zs + street_w / 4.0), Vec3::new(0.4, 0.02, street_w / 2.0 - 0.6));
+    place(&cube, &yellow, Vec3::new(xs, 0.17, zs), Vec3::new(1.0, 0.02, 1.0));
+    // Depot gate markings
+    place(&cube, &yellow, Vec3::new(-7.4, 0.17, lot_d / 2.0 + 3.0), Vec3::new(0.2, 0.02, 4.0));
+    place(&cube, &yellow, Vec3::new(7.4, 0.17, lot_d / 2.0 + 3.0), Vec3::new(0.2, 0.02, 4.0));
+
+    // Street lamps along both sides of the main street and the side street
+    let mut lamp = |x: f32, z: f32| {
+        place(&trunk, &lamp_mat, Vec3::new(x, 2.7, z), Vec3::new(0.35, 5.4, 0.35));
+        place(&cube, &lamp_glow, Vec3::new(x, 5.5, z), Vec3::new(0.9, 0.18, 0.5));
+    };
+    let mut lx = -reach + 10.0;
+    while lx < reach - 10.0 {
+        if (lx - xs).abs() > street_w / 2.0 + sw + 3.0 && lx.abs() > 9.0 {
+            lamp(lx, zs - street_w / 2.0 - 1.2);
+            lamp(lx + 11.0, zs + street_w / 2.0 + 1.2);
+        }
+        lx += 22.0;
+    }
+    let mut lz = -reach + 14.0;
+    while lz < reach - 10.0 {
+        if (lz - zs).abs() > street_w / 2.0 + sw + 3.0 {
+            lamp(xs - street_w / 2.0 - 1.2, lz);
+            lamp(xs + street_w / 2.0 + 1.2, lz + 11.0);
+        }
+        lz += 22.0;
+    }
+
+    // Buildings: (center x, center z, width, depth, floors, wall, facing +z(+1)/-z(-1))
+    #[rustfmt::skip]
+    let blocks: [(f32, f32, f32, f32, u32, usize, f32); 16] = [
+        // south of the main street (face the street = -z side)
+        (-70.0, zs + 28.0, 16.0, 14.0, 4, 0, -1.0),
+        (-50.0, zs + 27.0, 14.0, 13.0, 5, 1, -1.0),
+        (-30.0, zs + 28.0, 18.0, 14.0, 3, 2, -1.0),
+        (-8.0,  zs + 27.0, 14.0, 13.0, 6, 3, -1.0),
+        (14.0,  zs + 28.0, 16.0, 14.0, 4, 4, -1.0),
+        (34.0,  zs + 27.0, 12.0, 13.0, 5, 0, -1.0),
+        (xs + 26.0, zs + 28.0, 18.0, 14.0, 4, 2, -1.0),
+        (xs + 48.0, zs + 27.0, 16.0, 14.0, 7, 1, -1.0),
+        // east of the side street
+        (xs + 24.0, 10.0, 14.0, 20.0, 3, 4, 1.0),
+        (xs + 24.0, -18.0, 14.0, 22.0, 5, 3, 1.0),
+        (xs + 46.0, 10.0, 16.0, 18.0, 4, 0, 1.0),
+        (xs + 46.0, -18.0, 16.0, 20.0, 3, 2, 1.0),
+        // north-west corner behind the garage
+        (-48.0, -56.0, 20.0, 16.0, 4, 1, 1.0),
+        (-22.0, -60.0, 16.0, 14.0, 3, 4, 1.0),
+        (xs - 30.0, -52.0, 18.0, 14.0, 5, 3, 1.0),
+        (-80.0, -20.0, 14.0, 20.0, 4, 0, 1.0),
+    ];
+    for (i, (bx, bz2, w, dp, floors, wall, face)) in blocks.iter().enumerate() {
+        let h = *floors as f32 * 3.2;
+        place(&cube, &walls[*wall], Vec3::new(*bx, h / 2.0, *bz2), Vec3::new(*w, h, *dp));
+        place(&cube, &roofs[i % 2], Vec3::new(*bx, h + 0.25, *bz2), Vec3::new(*w + 0.6, 0.5, *dp + 0.6));
+        // Window grid on the street-facing wall
+        let cols = (*w / 3.0).floor() as i32;
+        for f in 0..*floors {
+            for c in 0..cols {
+                let wx = bx + (c as f32 - (cols as f32 - 1.0) / 2.0) * 3.0;
+                let lit = (i as u32 * 7 + f * 3 + c as u32 * 5) % 6 == 0;
+                let m = if lit { &win_lit } else { &win };
+                place(&cube, m, Vec3::new(wx, 2.2 + f as f32 * 3.2, bz2 + face * (*dp / 2.0 + 0.04)), Vec3::new(1.5, 1.5, 0.1));
+            }
+        }
+        // Shop awning / door on ground floor
+        place(&cube, &roofs[(i + 1) % 2], Vec3::new(*bx, 3.3, bz2 + face * (*dp / 2.0 + 0.6)), Vec3::new(*w * 0.6, 0.18, 1.2));
+    }
+    // Trees on the sidewalks
+    for tx in [-60.0, -38.0, -16.0, 20.0, 44.0] {
+        let (tz, s) = (zs + street_w / 2.0 + 1.6, 0.7);
+        place(&trunk, &bark, Vec3::new(tx, 1.1 * s, tz), Vec3::new(s, 2.2 * s, s));
+        place(&cone, &pine_a, Vec3::new(tx, 4.0 * s, tz), Vec3::new(2.4 * s, 4.2 * s, 2.4 * s));
+        place(&cone, &pine_b, Vec3::new(tx, 6.4 * s, tz), Vec3::new(1.7 * s, 3.4 * s, 1.7 * s));
     }
 
     // Selection marker (moved under the selected bus)
@@ -705,17 +848,21 @@ fn stat_line(f: &UiFonts, label: &str, v: f32) -> impl Bundle {
     )
 }
 
+#[derive(Resource, Default)]
+pub struct ShopTab(pub Category);
+
 pub fn rebuild_panel(
     mut commands: Commands,
     fonts: Res<UiFonts>,
     fleet: Res<Fleet>,
     catalog: Res<Catalog>,
     selected: Res<Selected>,
+    tab: Res<ShopTab>,
     body: Single<Entity, With<DepotBody>>,
-    mut last: Local<Option<(u32, Option<u32>, bool)>>,
+    mut last: Local<Option<(u32, Option<u32>, bool, Category)>>,
     view: Res<View>,
 ) {
-    let key = (fleet.version, selected.0, *view == View::Depot);
+    let key = (fleet.version, selected.0, *view == View::Depot, tab.0);
     if *last == Some(key) {
         return;
     }
@@ -772,7 +919,16 @@ pub fn rebuild_panel(
 
         // Shop
         p.spawn(text(f, true, 12.0, style::MUTED, "FLEET SHOP"));
-        for (i, spec) in catalog.0.iter().enumerate().take(8) {
+        p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), ..default() })
+            .with_children(|row| {
+                for c in Category::ALL {
+                    let kind = if c == tab.0 { BtnKind::Primary } else { BtnKind::Small };
+                    row.spawn(button(f, c.label(), Action::ShopTab(c), kind));
+                }
+            });
+        let mut shown = 0;
+        for (i, spec) in catalog.0.iter().enumerate().filter(|(_, s)| s.category == tab.0) {
+            shown += 1;
             let tag = if spec.is_mod { " (mod)" } else { "" };
             p.spawn((
                 Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() },
@@ -788,8 +944,8 @@ pub fn rebuild_panel(
                 ],
             ));
         }
-        if catalog.0.len() > 8 {
-            p.spawn(text(f, false, 11.0, style::MUTED, format!("+ {} more models installed", catalog.0.len() - 8)));
+        if shown == 0 {
+            p.spawn(text(f, false, 11.0, style::MUTED, "No buses in this category."));
         }
     });
 }
@@ -804,11 +960,13 @@ pub fn depot_actions(
     real: Res<Time<Real>>,
     mut selected: ResMut<Selected>,
     mut view: ResMut<View>,
+    mut tab: ResMut<ShopTab>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
             Action::SetView(v) => *view = v,
             Action::SelectBus(id) => selected.0 = Some(id),
+            Action::ShopTab(c) => tab.0 = c,
             Action::Buy(i) => {
                 let Some(spec) = catalog.0.get(i) else { continue };
                 if fleet.buses.len() >= BAYS {

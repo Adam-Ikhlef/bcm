@@ -12,7 +12,7 @@ use bevy::{
 use crate::{
     depot::MapCamera,
     osm::{AreaKind, MapData, Road, RoadClass},
-    style, Bus, Draft, GameWorld, Lines, StopQueues, MAX_WAITING,
+    style, Bus, GameWorld, Lines, StopQueues, MAX_WAITING,
 };
 
 const ICON_PX: f32 = 24.0; // base sprite size of the H icon (screen pixels at zoom scale 1)
@@ -489,24 +489,11 @@ pub fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
 
 pub fn draw_routes(
     mut gizmos: Gizmos,
-    map: Res<MapData>,
     lines: Res<Lines>,
-    draft: Res<Draft>,
-    cam: Single<&Projection, With<MapCamera>>,
 ) {
-    let scale = crate::ortho_scale(*cam);
     for l in &lines.0 {
         let mut c = l.color.to_srgba();
         c.alpha = 0.85;
         gizmos.linestrip_2d(l.route.path.iter().copied().chain(l.route.path.first().copied()), c);
-    }
-
-    let selected = style::ACCENT;
-    if draft.0.len() >= 2 {
-        gizmos.linestrip_2d(draft.0.iter().map(|&i| map.stops[i].pos), selected);
-    }
-    for (n, &i) in draft.0.iter().enumerate() {
-        let ring = if n == 0 { style::DANGER } else { selected };
-        gizmos.circle_2d(map.stops[i].pos, 15.0 * scale, ring);
     }
 }

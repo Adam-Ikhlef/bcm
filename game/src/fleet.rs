@@ -15,6 +15,44 @@ pub enum Look {
     Solo,
     Articulated,
     Mini,
+    Double,
+}
+
+/// The four bus categories shown in the fleet shop.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Category {
+    Minibus,
+    #[default]
+    Solo,
+    Doubledecker,
+    Articulated,
+}
+
+impl Category {
+    pub const ALL: [Category; 4] = [Category::Minibus, Category::Solo, Category::Doubledecker, Category::Articulated];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Minibus => "Minibus",
+            Category::Solo => "Solo bus",
+            Category::Doubledecker => "Double-decker",
+            Category::Articulated => "Articulated",
+        }
+    }
+
+    /// Guess for mods that don't say: by size.
+    pub fn guess(length: f32, height: f32) -> Category {
+        if height >= 3.8 {
+            Category::Doubledecker
+        } else if length >= 15.0 {
+            Category::Articulated
+        } else if length < 9.5 {
+            Category::Minibus
+        } else {
+            Category::Solo
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +66,7 @@ pub enum Model {
 #[derive(Clone, Debug)]
 pub struct BusSpec {
     pub name: String,
+    pub category: Category,
     pub length: f32,
     pub width: f32,
     pub height: f32,
@@ -48,50 +87,37 @@ pub struct BusSpec {
 pub struct Catalog(pub Vec<BusSpec>);
 
 pub fn builtin_specs() -> Vec<BusSpec> {
-    vec![
-        BusSpec {
-            name: "City Bus 12 m".into(),
-            length: 12.0,
-            width: 2.55,
-            height: 3.1,
-            capacity: 70.0,
-            price: 3_000.0,
-            fuel_per_km: 3.0,
-            wear_per_km: 0.5,
-            run_cost: 0.004,
-            color: style::rgb(0x1f, 0x6f, 0xd9),
-            model: Model::Builtin(Look::Solo),
+    // (name, category, look, length, height, capacity, price, fuel/km, wear/km, run cost, color)
+    #[rustfmt::skip]
+    let rows: [(&str, Category, Look, f32, f32, f32, f64, f32, f32, f64, (u8, u8, u8)); 10] = [
+        ("Mini Shuttle 6 m",   Category::Minibus,      Look::Mini,        6.5, 2.7, 20.0, 1_200.0, 1.6, 0.35, 0.0018, (0xf2, 0xb1, 0x1f)),
+        ("Minibus 8 m",        Category::Minibus,      Look::Mini,        8.0, 2.9, 30.0, 1_700.0, 2.0, 0.40, 0.0025, (0xe0, 0x7a, 0x1f)),
+        ("City Bus 10 m",      Category::Solo,         Look::Solo,       10.0, 3.0, 55.0, 2_400.0, 2.6, 0.45, 0.0034, (0x3a, 0x8f, 0xe8)),
+        ("City Bus 12 m",      Category::Solo,         Look::Solo,       12.0, 3.1, 70.0, 3_000.0, 3.0, 0.50, 0.0040, (0x1f, 0x6f, 0xd9)),
+        ("Low-Floor 12 m Eco", Category::Solo,         Look::Solo,       12.0, 3.1, 75.0, 3_700.0, 2.4, 0.42, 0.0036, (0x2e, 0xa0, 0x5a)),
+        ("Double-Decker 10 m", Category::Doubledecker, Look::Double,     10.0, 4.2, 85.0, 4_300.0, 3.4, 0.55, 0.0046, (0xc8, 0x1e, 0x25)),
+        ("Double-Decker 11 m", Category::Doubledecker, Look::Double,     11.2, 4.3, 100.0, 5_100.0, 3.8, 0.58, 0.0052, (0x8e, 0x2a, 0xb4)),
+        ("Articulated 18 m",   Category::Articulated,  Look::Articulated,18.0, 3.1, 110.0, 6_200.0, 4.5, 0.60, 0.0065, (0x12, 0x9a, 0x8c)),
+        ("Articulated 18 m XL",Category::Articulated,  Look::Articulated,18.75,3.1, 125.0, 7_300.0, 4.9, 0.62, 0.0072, (0x0f, 0x6e, 0x8c)),
+        ("Mini Shuttle Plus",  Category::Minibus,      Look::Mini,        7.2, 2.8, 25.0, 1_450.0, 1.8, 0.38, 0.0021, (0x6a, 0xb0, 0x40)),
+    ];
+    rows.into_iter()
+        .map(|(name, category, look, length, height, capacity, price, fuel, wear, run, c)| BusSpec {
+            name: name.into(),
+            category,
+            length,
+            width: if look == Look::Mini { 2.3 } else { 2.55 },
+            height,
+            capacity,
+            price,
+            fuel_per_km: fuel,
+            wear_per_km: wear,
+            run_cost: run,
+            color: style::rgb(c.0, c.1, c.2),
+            model: Model::Builtin(look),
             is_mod: false,
-        },
-        BusSpec {
-            name: "Articulated 18 m".into(),
-            length: 18.0,
-            width: 2.55,
-            height: 3.1,
-            capacity: 110.0,
-            price: 6_200.0,
-            fuel_per_km: 4.5,
-            wear_per_km: 0.6,
-            run_cost: 0.0065,
-            color: style::rgb(0x12, 0x9a, 0x8c),
-            model: Model::Builtin(Look::Articulated),
-            is_mod: false,
-        },
-        BusSpec {
-            name: "Minibus 8 m".into(),
-            length: 8.0,
-            width: 2.3,
-            height: 2.9,
-            capacity: 30.0,
-            price: 1_700.0,
-            fuel_per_km: 2.0,
-            wear_per_km: 0.4,
-            run_cost: 0.0025,
-            color: style::rgb(0xe0, 0x7a, 0x1f),
-            model: Model::Builtin(Look::Mini),
-            is_mod: false,
-        },
-    ]
+        })
+        .collect()
 }
 
 // --- Mods ---------------------------------------------------------------------
@@ -140,6 +166,8 @@ struct ModJson {
     rotation_y: f32,
     #[serde(default = "d_scale")]
     scale: f32,
+    /// "minibus" | "solo" | "doubledecker" | "articulated" (guessed from size if missing).
+    category: Option<Category>,
 }
 
 fn d_length() -> f32 { 12.0 }
@@ -193,6 +221,7 @@ pub fn scan_mods(dirs: &ModDirs) -> Vec<BusSpec> {
             }
             out.push(BusSpec {
                 name: m.name,
+                category: m.category.unwrap_or_else(|| Category::guess(m.length, m.height)),
                 length: m.length,
                 width: m.width,
                 height: m.height,
