@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/YOZTeam/BusManager/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/YOZTeam/BusManager?label=version&color=f47f30&style=for-the-badge"></a>
-  <a href="https://bcm.yoz-team.online/"><img alt="Playing now" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fbcm.adamikhlef.workers.dev%2Fbadge&label=playing%20now&style=for-the-badge&logo=steam&logoColor=white"></a>
+  <a href="https://busmanager.yoz-team.online/"><img alt="Playing now" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fbcm.adamikhlef.workers.dev%2Fbadge&label=playing%20now&style=for-the-badge&logo=steam&logoColor=white"></a>
   <a href="https://github.com/YOZTeam/BusManager/actions/workflows/build.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/YOZTeam/BusManager/build.yml?branch=main&style=for-the-badge&label=build"></a>
   <a href="https://bcm.yoz-team.online/"><img alt="Docs" src="https://img.shields.io/badge/docs-website-2d3138?style=for-the-badge"></a>
-  <a href="https://discord.gg/"><img alt="Discord" src="https://img.shields.io/badge/discord-join%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
+  <a href="https://discord.gg/Ppx7u4g2Wt"><img alt="Discord" src="https://img.shields.io/badge/discord-join%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
   <a href="https://ko-fi.com/adamikhlef"><img alt="Ko-fi" src="https://img.shields.io/badge/ko--fi-support-29abe0?style=for-the-badge&logo=kofi&logoColor=white"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/YOZTeam/BusManager?style=for-the-badge"></a>
 </p>
@@ -11,11 +11,11 @@
 > [!WARNING]
 > **Early development. Expect bugs.** Things may be missing, broken or change between
 > versions. Please report problems in [Issues](https://github.com/YOZTeam/BusManager/issues)
-> or on our [Discord server](https://discord.gg/).
+> or on our [Discord server](https://discord.gg/Ppx7u4g2Wt).
 
 # Bus Manager (prototype)
 
-A City Bus Manager-style game built with Rust + Bevy, on **real OpenStreetMap data**, drawn in the
+A bus company management game built with Rust + Bevy, on **real OpenStreetMap data**, drawn in the
 OpenStreetMap standard look (green land, outlined roads, German **H** bus stop signs).
 Targets Windows, macOS and Ubuntu.
 
