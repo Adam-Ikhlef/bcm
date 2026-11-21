@@ -322,11 +322,10 @@ fn make_badge_icon() -> Image {
     )
 }
 
-pub fn load_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    commands.insert_resource(Icons {
-        stop: images.add(make_stop_icon()),
-        badge: images.add(make_badge_icon()),
-    });
+pub fn install_icons(world: &mut World) {
+    let mut images = world.resource_mut::<Assets<Image>>();
+    let icons = Icons { stop: images.add(make_stop_icon()), badge: images.add(make_badge_icon()) };
+    world.insert_resource(icons);
 }
 
 // --- Stops ------------------------------------------------------------------
@@ -396,7 +395,7 @@ pub fn update_stop_icons(
 /// Buses stay visible when zoomed out.
 pub fn update_bus_scale(cam: Single<&Projection, With<Camera2d>>, mut buses: Query<&mut Transform, With<Bus>>) {
     let scale = crate::ortho_scale(*cam);
-    let f = (16.0 * scale / 30.0).max(1.0);
+    let f = (scale * 0.8).max(1.0); // roughly 21 x 8 screen pixels when zoomed out
     for mut tf in &mut buses {
         if (tf.scale.x - f).abs() > 1e-3 {
             tf.scale = Vec3::splat(f);

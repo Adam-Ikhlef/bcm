@@ -133,6 +133,16 @@ pub fn ortho_scale(p: &Projection) -> f32 {
 }
 
 fn main() {
+    // Players often start the game by double-click, so a crash would vanish silently:
+    // also write the error to crash.log next to the game.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+            let _ = std::fs::write(dir.join("crash.log"), format!("Bus Manager {VERSION} crashed:\n{info}\n"));
+        }
+        default_hook(info);
+    }));
+
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -153,6 +163,11 @@ fn main() {
     .init_resource::<render::RoadLayers>()
     .add_event::<UiAction>();
 
+    // Created now (not in Startup): the first state's OnEnter systems need them immediately.
+    ui::install_fonts(app.world_mut());
+    render::install_icons(app.world_mut());
+    setup_camera(app.world_mut());
+
     // Optional: `busmanager path/to/city.osm.pbf` skips the menu.
     match std::env::args().nth(1) {
         Some(path) => match osm::load_pbf(std::path::Path::new(&path)) {
@@ -171,7 +186,7 @@ fn main() {
     }
 
     app.add_plugins(menu::MenuPlugin)
-        .add_systems(Startup, (setup_camera, ui::load_fonts, render::load_icons, render::configure_gizmos))
+        .add_systems(Startup, render::configure_gizmos)
         .add_systems(
             Update,
             (ui::button_visuals, ui::emit_actions, ui::track_ui_block).chain(),
@@ -208,8 +223,8 @@ fn main() {
         .run();
 }
 
-fn setup_camera(mut commands: Commands) {
-    commands.spawn((
+fn setup_camera(world: &mut World) {
+    world.spawn((
         Camera2d,
         Projection::Orthographic(OrthographicProjection { scale: 3.0, ..OrthographicProjection::default_2d() }),
     ));
@@ -240,7 +255,7 @@ fn init_game(
     tf.translation = ((min + max) * 0.5).extend(tf.translation.z);
     let extent = (max - min).max(Vec2::splat(200.0));
     if let Projection::Orthographic(o) = &mut *proj {
-        o.scale = (extent.x / window.width()).max(extent.y / window.height()) * 1.1;
+        o.scale = (extent.x / (window.width() - 340.0)).max(extent.y / (window.height() - 200.0)) * 1.1;
         o.scale = o.scale.clamp(0.3, 300.0);
         // Start zoomed in a bit for big cities so the map is readable.
         o.scale = o.scale.min(40.0);
@@ -380,8 +395,12 @@ fn spawn_bus(commands: &mut Commands, route: &Arc<Route>, line: usize, start: us
     commands.spawn((
         Bus { route: route.clone(), line, next: (start + 1) % len, load: 0.0, dwell: 0.0 },
         Sprite::from_color(color, Vec2::new(26.0, 10.0)),
-        Transform::from_translation(route.path[start].extend(2.0)),
+        Transform::from_translation(route.path[start].extend(4.0)),
         GameWorld,
+        children![(
+            Sprite::from_color(Color::WHITE, Vec2::new(31.0, 15.0)),
+            Transform::from_xyz(0.0, 0.0, -0.1),
+        )],
     ));
 }
 
@@ -432,9 +451,8 @@ fn game_actions(
                         for b in 0..BUSES_PER_NEW_LINE {
                             spawn_bus(&mut commands, &route, idx, b * route.path.len() / BUSES_PER_NEW_LINE, color);
                         }
-                        eco.money -= cost;
-                        eco.costs += cost;
-                        lines.0.push(BusLine { route, color, buses: BUSES_PER_NEW_LINE, income: 0.0, cost });
+                        eco.money -= cost; // buying buses is an investment, not part of profit
+                        lines.0.push(BusLine { route, color, buses: BUSES_PER_NEW_LINE, income: 0.0, cost: 0.0 });
                         eco.say(&real, format!("Line {} opened", idx + 1));
                         draft.0.clear();
                         *tool = Tool::Idle;
@@ -449,8 +467,6 @@ fn game_actions(
                 }
                 if let Some(line) = lines.0.get_mut(i) {
                     eco.money -= BUS_PRICE;
-                    eco.costs += BUS_PRICE;
-                    line.cost += BUS_PRICE;
                     line.buses += 1;
                     let start = (line.buses * 7) % line.route.path.len();
                     spawn_bus(&mut commands, &line.route, i, start, line.color);
@@ -513,7 +529,7 @@ fn move_buses(
             let d = to.length();
 
             if d <= remaining {
-                tf.translation = target.extend(2.0);
+                tf.translation = target.extend(4.0);
                 remaining -= d;
                 traveled += d;
                 bus.next = (idx + 1) % bus.route.path.len();

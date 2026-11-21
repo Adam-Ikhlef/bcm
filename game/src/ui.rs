@@ -15,15 +15,16 @@ pub struct UiFonts {
     pub bold: Handle<Font>,
 }
 
-pub fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
+/// Called while building the app, so the fonts exist before the very first state transition
+/// (the menu's OnEnter system runs before any Startup commands are applied).
+pub fn install_fonts(world: &mut World) {
     let regular = Font::try_from_bytes(include_bytes!("../assets/fonts/Inter-Regular.otf").to_vec())
         .expect("embedded font");
     let bold = Font::try_from_bytes(include_bytes!("../assets/fonts/Inter-SemiBold.otf").to_vec())
         .expect("embedded font");
-    commands.insert_resource(UiFonts {
-        regular: fonts.add(regular),
-        bold: fonts.add(bold),
-    });
+    let mut fonts = world.resource_mut::<Assets<Font>>();
+    let fonts = UiFonts { regular: fonts.add(regular), bold: fonts.add(bold) };
+    world.insert_resource(fonts);
 }
 
 pub fn text(fonts: &UiFonts, bold: bool, size: f32, color: Color, s: impl Into<String>) -> impl Bundle {

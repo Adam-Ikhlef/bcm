@@ -4,7 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bevy = "0.16"
+# Only the 2D parts of Bevy are needed (smaller binary, faster builds, works on weaker GPUs)
+bevy = { version = "0.16", default-features = false, features = [
+    "std", "async_executor", "multi_threaded",
+    "bevy_asset", "bevy_color", "bevy_core_pipeline", "bevy_gizmos", "bevy_log",
+    "bevy_render", "bevy_sprite", "bevy_state", "bevy_text", "bevy_ui",
+    "bevy_window", "bevy_winit", "x11", "wayland",
+] }
 osmpbfreader = "0.19"
 petgraph = "0.6"
 serde = { version = "1", features = ["derive"] }
