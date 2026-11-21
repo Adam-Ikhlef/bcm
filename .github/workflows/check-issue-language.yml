@@ -1,0 +1,90 @@
+name: Check Issue Language
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  check-language:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if issue is in English
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title || "";
+            const body = issue.body || "";
+
+            // Strip code blocks, URLs, and issue template headings so logs/paths don't skew detection
+            const cleanedText = `${title}\n${body}`
+              .replace(/```[\s\S]*?```/g, " ")
+              .replace(/`[^`]*`/g, " ")
+              .replace(/https?:\/\/\S+/g, " ")
+              .replace(/^###\s+.*$/gm, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+
+            // Skip very short texts or pure logs/numbers
+            const letters = cleanedText.replace(/[^a-zA-ZÀ-ÿ\u0400-\u04FF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/g, "");
+            if (letters.length < 15) {
+              core.info("Text too short to reliably determine language; leaving open.");
+              return;
+            }
+
+            // 1. Check for non-Latin scripts (Arabic, Cyrillic, CJK, Hangul, etc.)
+            const nonLatinMatches = cleanedText.match(/[\u0400-\u04FF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/g) || [];
+            const nonLatinRatio = nonLatinMatches.length / letters.length;
+
+            // 2. Check common English words vs common non-English Latin words
+            const words = cleanedText.toLowerCase().match(/[a-zà-ÿ']+/g) || [];
+            const englishStopwords = new Set([
+              "the", "is", "are", "was", "were", "be", "been", "to", "of", "and",
+              "a", "in", "that", "have", "i", "it", "for", "not", "on", "with",
+              "he", "as", "you", "do", "at", "this", "but", "his", "by", "from",
+              "they", "we", "say", "her", "she", "or", "an", "will", "my", "one",
+              "all", "would", "there", "their", "what", "so", "up", "out", "if",
+              "about", "who", "get", "which", "go", "me", "when", "can", "no",
+              "just", "him", "know", "take", "into", "your", "some", "could",
+              "them", "see", "other", "than", "then", "now", "only", "come",
+              "its", "over", "think", "also", "back", "after", "use", "two",
+              "how", "our", "work", "first", "well", "way", "even", "new",
+              "want", "because", "any", "these", "give", "most", "us", "game",
+              "bus", "stop", "line", "map", "crash", "error", "bug", "feature",
+              "installer", "open", "click", "select", "city", "download", "does",
+              "doesn't", "cannot", "can't", "won't", "issue", "problem", "add"
+            ]);
+
+            const englishHits = words.filter(w => englishStopwords.has(w)).length;
+            const englishRatio = words.length > 0 ? englishHits / words.length : 0;
+
+            const isNonEnglish = nonLatinRatio > 0.2 || (words.length >= 8 && englishRatio < 0.08);
+
+            if (!isNonEnglish) {
+              core.info("Issue appears to be in English. Doing nothing.");
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: [
+                `Hello @${issue.user.login},`,
+                "",
+                "Thank you for opening an issue! To keep tracking and collaboration accessible to everyone, this repository only accepts issues written in **English**.",
+                "",
+                "This issue has been automatically closed. Please feel free to open a new issue in English (or translate your message and resubmit).",
+              ].join("\n"),
+            });
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              state: "closed",
+              state_reason: "not_planned",
+            });
