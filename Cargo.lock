@@ -1348,7 +1348,7 @@ checksum = "87a0cf66fd1eb2fb7b822cb78370d82303750809bc6ba855f3f58e517d3238db"
 
 [[package]]
 name = "busmanager"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "dirs",
@@ -1362,7 +1362,7 @@ dependencies = [
 
 [[package]]
 name = "busmanager-installer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dirs",
  "eframe",

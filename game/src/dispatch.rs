@@ -88,7 +88,12 @@ pub fn daily_rollover(
     trips.version += 1;
     eco.say(
         &real,
-        format!("Day {}: paid {} to {} drivers · new candidates are waiting", day + 1, fmt_money(wages), staff.drivers.len()),
+        format!(
+            "Day {}: paid {} to {} drivers · new candidates are waiting",
+            day + 1,
+            fmt_money(wages),
+            staff.drivers.len()
+        ),
     );
 }
 
@@ -101,7 +106,13 @@ impl BusLine {
 }
 
 /// Starts the road trip back to the depot from `pos`. Returns false if no road leads there.
-pub fn start_return(bus: &mut Bus, pos: Vec2, map: &MapData, depot: &DepotSite, home: Option<&Vec<Vec2>>) -> bool {
+pub fn start_return(
+    bus: &mut Bus,
+    pos: Vec2,
+    map: &MapData,
+    depot: &DepotSite,
+    home: Option<&Vec<Vec2>>,
+) -> bool {
     let path = match home {
         Some(h) if pos.distance(bus.route.path[0]) < 1.0 => Some(h.clone()),
         _ => map
@@ -184,10 +195,22 @@ pub fn advance_departures(
         }
     }
     for (id, d) in done {
-        let Some(spec_idx) = fleet.get(id).map(|b| b.spec) else { continue };
+        let Some(spec_idx) = fleet.get(id).map(|b| b.spec) else {
+            continue;
+        };
         let eff = staff.get(d.driver).map(|x| x.efficiency()).unwrap_or(1.0);
         if let Some(line) = lines.0.get(d.line) {
-            spawn_bus(&mut commands, d.line, line, id, eff, d.driver, &catalog.0[spec_idx], d.wait_until, &depot);
+            spawn_bus(
+                &mut commands,
+                d.line,
+                line,
+                id,
+                eff,
+                d.driver,
+                &catalog.0[spec_idx],
+                d.wait_until,
+                &depot,
+            );
         }
         if let Some(b) = fleet.get_mut(id) {
             b.depart = None;
@@ -224,7 +247,9 @@ pub fn dispatch_trips(
             if now >= d - CLAIM_MIN {
                 let mut claimed = None;
                 for mut b in buses.iter_mut() {
-                    let shift_ok = staff.get(b.driver).is_some_and(|dr| dr.shift.contains(minute));
+                    let shift_ok = staff
+                        .get(b.driver)
+                        .is_some_and(|dr| dr.shift.contains(minute));
                     if b.line == li && b.phase == Phase::Layover && !b.retire && shift_ok {
                         b.phase = Phase::Wait;
                         b.wait_until = d;
@@ -246,7 +271,9 @@ pub fn dispatch_trips(
             }
 
             // 2) Otherwise send a bus out of the depot. Wait for a bus that is about to return to the terminus.
-            let layover_soon = buses.iter().any(|b| b.line == li && b.phase == Phase::Layover && !b.retire);
+            let layover_soon = buses
+                .iter()
+                .any(|b| b.line == li && b.phase == Phase::Layover && !b.retire);
             if layover_soon && now < d - CLAIM_MIN {
                 continue;
             }
@@ -254,10 +281,18 @@ pub fn dispatch_trips(
             let driver_id = staff.free_on_shift(minute);
             match (bus_id, driver_id) {
                 (Some(bid), Some(did)) => {
-                    let Some(bay) = fleet.get(bid).and_then(|b| b.bay) else { continue };
+                    let Some(bay) = fleet.get(bid).and_then(|b| b.bay) else {
+                        continue;
+                    };
                     let total = depot::exit_length(bay) / EXIT_SPEED;
                     if let Some(b) = fleet.get_mut(bid) {
-                        b.depart = Some(Depart { line: li, driver: did, wait_until: d, elapsed: 0.0, total });
+                        b.depart = Some(Depart {
+                            line: li,
+                            driver: did,
+                            wait_until: d,
+                            elapsed: 0.0,
+                            total,
+                        });
                     }
                     fleet.version += 1;
                     let plate = fleet.get(bid).map(|b| b.plate.clone()).unwrap_or_default();
@@ -266,17 +301,34 @@ pub fn dispatch_trips(
                         dr.bus = Some(bid);
                     }
                     staff.version += 1;
-                    trips.done.insert(key, Outcome::Assigned { plate, driver: name });
+                    trips.done.insert(
+                        key,
+                        Outcome::Assigned {
+                            plate,
+                            driver: name,
+                        },
+                    );
                     trips.served_total += 1;
                     trips.version += 1;
                 }
                 _ => {
                     if now > d + LATE_LIMIT_MIN {
-                        let reason = if bus_id.is_none() { "no bus ready" } else { "no driver on shift" };
+                        let reason = if bus_id.is_none() {
+                            "no bus ready"
+                        } else {
+                            "no driver on shift"
+                        };
                         trips.done.insert(key, Outcome::Missed(reason));
                         trips.missed_total += 1;
                         trips.version += 1;
-                        eco.say(&real, format!("Line {}: the {} trip was missed ({reason})", li + 1, crate::ops::hhmm(minute)));
+                        eco.say(
+                            &real,
+                            format!(
+                                "Line {}: the {} trip was missed ({reason})",
+                                li + 1,
+                                crate::ops::hhmm(minute)
+                            ),
+                        );
                     }
                 }
             }
@@ -302,9 +354,16 @@ pub fn layover_manager(
         if bus.phase != Phase::Layover {
             continue;
         }
-        let Some(line) = lines.0.get(bus.line) else { continue };
-        let shift_over = !staff.get(bus.driver).is_some_and(|d| d.shift.contains(minute));
-        let no_work = line.timetable.departures(now, now + IDLE_RETURN_MIN).is_empty();
+        let Some(line) = lines.0.get(bus.line) else {
+            continue;
+        };
+        let shift_over = !staff
+            .get(bus.driver)
+            .is_some_and(|d| d.shift.contains(minute));
+        let no_work = line
+            .timetable
+            .departures(now, now + IDLE_RETURN_MIN)
+            .is_empty();
         let rested = now - bus.since >= 1.0;
         if bus.retire || shift_over || (no_work && rested) {
             let home = line.home_leg.as_ref();

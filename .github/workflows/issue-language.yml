@@ -1,0 +1,40 @@
+name: Issue language
+
+# Issues must be in English. This closes issues whose text is mostly written in a non-Latin script
+# (Arabic, Cyrillic, CJK, ...). Latin-script languages (French, Spanish, ...) cannot be detected
+# reliably by a script, so maintainers close those by hand.
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            if (issue.state !== 'open' || issue.user.type === 'Bot') return;
+            const text = `${issue.title}\n${issue.body || ''}`
+              .replace(/```[\s\S]*?```/g, ' ')      // ignore code and logs
+              .replace(/`[^`]*`/g, ' ')
+              .replace(/https?:\/\/\S+/g, ' ');
+            const letters = text.match(/\p{L}/gu) || [];
+            if (letters.length < 12) return;
+            const latin = text.match(/\p{Script=Latin}/gu) || [];
+            const nonLatinShare = 1 - latin.length / letters.length;
+            if (nonLatinShare < 0.3) return;
+
+            const { owner, repo } = context.repo;
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: issue.number,
+              body: 'Thanks for the report! This project only accepts issues written in **English**, so that every maintainer and contributor can read them. ' +
+                    'Please open a new issue in English (a translation tool is fine). Closing this one.',
+            });
+            await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: ['not english'] }).catch(() => {});
+            await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed', state_reason: 'not_planned' });

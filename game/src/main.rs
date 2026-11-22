@@ -1,6 +1,6 @@
 mod busmodel;
-mod dispatch;
 mod depot;
+mod dispatch;
 mod fleet;
 mod menu;
 mod net;
@@ -8,6 +8,7 @@ mod ops;
 mod osm;
 mod planner;
 mod render;
+mod settings;
 mod staffui;
 mod style;
 mod ui;
@@ -26,8 +27,8 @@ use dispatch::Phase;
 use fleet::{BusSpec, Catalog, Fleet};
 use ops::{DepotSite, GameClock, Staff, Timetable, Trips};
 use osm::{MapData, Route};
-use ui::{Action, UiAction};
 pub use planner::Draft;
+use ui::{Action, UiAction};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -98,7 +99,14 @@ pub struct Economy {
 
 impl Default for Economy {
     fn default() -> Self {
-        Self { money: START_MONEY, income: 0.0, costs: 0.0, boarded: 0, msg: String::new(), msg_until: 0.0 }
+        Self {
+            money: START_MONEY,
+            income: 0.0,
+            costs: 0.0,
+            boarded: 0,
+            msg: String::new(),
+            msg_until: 0.0,
+        }
     }
 }
 
@@ -142,8 +150,14 @@ fn main() {
     // also write the error to crash.log next to the game.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
-            let _ = std::fs::write(dir.join("crash.log"), format!("Bus Manager {VERSION} crashed:\n{info}\n"));
+        if let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        {
+            let _ = std::fs::write(
+                dir.join("crash.log"),
+                format!("Bus Manager {VERSION} crashed:\n{info}\n"),
+            );
         }
         default_hook(info);
     }));
@@ -152,7 +166,12 @@ fn main() {
     let mod_dirs = fleet::mod_dirs();
     let mut specs: Vec<BusSpec> = fleet::builtin_specs();
     let mods = fleet::scan_mods(&mod_dirs);
-    println!("Bus catalog: {} built-in, {} from mods ({})", specs.len(), mods.len(), mod_dirs.user.display());
+    println!(
+        "Bus catalog: {} built-in, {} from mods ({})",
+        specs.len(),
+        mods.len(),
+        mod_dirs.user.display()
+    );
     specs.extend(mods);
 
     let mut app = App::new();
@@ -176,6 +195,7 @@ fn main() {
         }),
         ..default()
     }))
+    .insert_resource(settings::Settings::load())
     .insert_resource(ClearColor(style::MAP_BG))
     .insert_resource(Catalog(specs))
     .init_resource::<Lines>()
@@ -183,6 +203,7 @@ fn main() {
     .init_resource::<planner::Preview>()
     .init_resource::<planner::Search>()
     .init_resource::<planner::DraftMeta>()
+    .init_resource::<ui::LinesOpen>()
     .init_resource::<staffui::TimetableUi>()
     .init_resource::<Economy>()
     .init_resource::<StopQueues>()
@@ -200,6 +221,7 @@ fn main() {
 
     // Created now (not in Startup): the first state's OnEnter systems need them immediately.
     ui::install_fonts(app.world_mut());
+    ui::install_nav_icons(app.world_mut());
     render::install_icons(app.world_mut());
     depot::install_depot(app.world_mut());
     depot::setup_cameras(app.world_mut());
@@ -225,7 +247,15 @@ fn main() {
         .add_systems(Startup, render::configure_gizmos)
         .add_systems(
             Update,
-            (ui::button_visuals, ui::emit_actions, ui::track_ui_block).chain(),
+            (
+                ui::button_visuals,
+                ui::emit_actions,
+                ui::track_ui_block,
+                settings::apply_settings,
+                ui::ui_toggles,
+                ui::lines_panel_visibility,
+            )
+                .chain(),
         )
         .add_systems(
             OnEnter(AppState::Playing),
@@ -314,7 +344,9 @@ fn init_game(
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&mut Transform, &mut Projection), With<MapCamera>>,
 ) {
-    commands.insert_resource(StopQueues { waiting: vec![0.0; map.stops.len()] });
+    commands.insert_resource(StopQueues {
+        waiting: vec![0.0; map.stops.len()],
+    });
     commands.insert_resource(Economy::default());
     commands.insert_resource(Lines::default());
     commands.insert_resource(Draft::default());
@@ -325,7 +357,11 @@ fn init_game(
     commands.insert_resource(depot::DepotHover::default());
     // Developer/test option: BUSMANAGER_CLOCK=05:50 starts the game at that time.
     let mut clock = GameClock::default();
-    if let Some((h, mi)) = std::env::var("BUSMANAGER_CLOCK").ok().as_deref().and_then(|v| v.split_once(':')) {
+    if let Some((h, mi)) = std::env::var("BUSMANAGER_CLOCK")
+        .ok()
+        .as_deref()
+        .and_then(|v| v.split_once(':'))
+    {
         if let (Ok(h), Ok(mi)) = (h.parse::<u32>(), mi.parse::<u32>()) {
             clock.abs = (h * 60 + mi) as f64;
         }
@@ -338,17 +374,28 @@ fn init_game(
     let site = map
         .stops
         .iter()
-        .min_by(|a, b| a.pos.distance_squared(centroid).total_cmp(&b.pos.distance_squared(centroid)))
-        .map(|s| DepotSite { node: s.node, pos: s.pos })
+        .min_by(|a, b| {
+            a.pos
+                .distance_squared(centroid)
+                .total_cmp(&b.pos.distance_squared(centroid))
+        })
+        .map(|s| DepotSite {
+            node: s.node,
+            pos: s.pos,
+        })
         .or_else(|| {
-            map.nearest_node(centroid, f32::MAX).map(|(node, pos)| DepotSite { node, pos })
+            map.nearest_node(centroid, f32::MAX)
+                .map(|(node, pos)| DepotSite { node, pos })
         })
         .expect("map has no roads");
     commands.insert_resource(site);
 
     // Starting staff: two early drivers and one late driver, plus today's candidates.
     let mut staff = Staff::default();
-    for (k, shift) in [ops::Shift::Early, ops::Shift::Early, ops::Shift::Late].into_iter().enumerate() {
+    for (k, shift) in [ops::Shift::Early, ops::Shift::Early, ops::Shift::Late]
+        .into_iter()
+        .enumerate()
+    {
         let d = staff.make_driver(1000 + k as u64, shift);
         staff.drivers.push(d);
     }
@@ -357,7 +404,11 @@ fn init_game(
 
     // Starting fleet: a few standard city buses (the first catalog entry).
     let mut fleet = Fleet::default();
-    let start_spec = catalog.0.iter().position(|s| s.name == "City Bus 12 m").unwrap_or(0);
+    let start_spec = catalog
+        .0
+        .iter()
+        .position(|s| s.name == "City Bus 12 m")
+        .unwrap_or(0);
     for _ in 0..START_BUSES {
         fleet.add(start_spec);
     }
@@ -376,7 +427,8 @@ fn init_game(
     tf.translation = ((min + max) * 0.5).extend(tf.translation.z);
     let extent = (max - min).max(Vec2::splat(200.0));
     if let Projection::Orthographic(o) = &mut *proj {
-        o.scale = (extent.x / (window.width() - 340.0)).max(extent.y / (window.height() - 200.0)) * 1.1;
+        o.scale =
+            (extent.x / (window.width() - 340.0)).max(extent.y / (window.height() - 200.0)) * 1.1;
         o.scale = o.scale.clamp(0.3, 300.0);
         // Start zoomed in a bit for big cities so the map is readable.
         o.scale = o.scale.min(40.0);
@@ -491,7 +543,11 @@ fn hotkeys(
         return;
     }
     if keys.just_pressed(KeyCode::Tab) {
-        let to = if *view == View::Map { View::Depot } else { View::Map };
+        let to = if *view == View::Map {
+            View::Depot
+        } else {
+            View::Map
+        };
         events.write(UiAction(Action::SetView(to)));
     }
     if *view == View::Map {
@@ -522,7 +578,12 @@ fn hotkeys(
 /// Developer/test option: `BUSMANAGER_WEAR=50` makes buses wear out 50x faster.
 pub fn wear_multiplier() -> f32 {
     static M: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
-    *M.get_or_init(|| std::env::var("BUSMANAGER_WEAR").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0))
+    *M.get_or_init(|| {
+        std::env::var("BUSMANAGER_WEAR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0)
+    })
 }
 
 /// Assigns the first free, roadworthy bus to a line. It leaves the depot for the line's departures.
@@ -559,7 +620,10 @@ fn game_actions(
                 *tool = Tool::Drawing;
                 draft.0.clear();
                 *meta = planner::DraftMeta::default();
-                eco.say(&real, "Click bus stops in the order buses should serve them");
+                eco.say(
+                    &real,
+                    "Click bus stops in the order buses should serve them",
+                );
             }
             Action::Cancel => {
                 if *tool == Tool::Drawing {
@@ -591,7 +655,10 @@ fn game_actions(
                         if let Some(iv) = meta.interval {
                             timetable.interval = iv.clamp(5, 60);
                         }
-                        let name = meta.name.take().unwrap_or_else(|| format!("Line {}", idx + 1));
+                        let name = meta
+                            .name
+                            .take()
+                            .unwrap_or_else(|| format!("Line {}", idx + 1));
                         lines.0.push(BusLine {
                             name: name.clone(),
                             route: Arc::new(route),
@@ -615,19 +682,31 @@ fn game_actions(
                         } else {
                             "set its timetable with “Timetable” in the Lines panel"
                         };
-                        eco.say(&real, format!("{name} opened with {sent} bus{} · {note}", if sent == 1 { "" } else { "es" }));
+                        eco.say(
+                            &real,
+                            format!(
+                                "{name} opened with {sent} bus{} · {note}",
+                                if sent == 1 { "" } else { "es" }
+                            ),
+                        );
                         draft.0.clear();
                         *meta = planner::DraftMeta::default();
                         *tool = Tool::Idle;
                     }
-                    _ => eco.say(&real, "No road connects these stops (one-way streets or separate road networks)"),
+                    _ => eco.say(
+                        &real,
+                        "No road connects these stops (one-way streets or separate road networks)",
+                    ),
                 }
             }
             Action::AddBus(i) => {
                 if i < lines.0.len() && assign_bus(&mut fleet, i) {
                     eco.say(&real, format!("Bus assigned to {}", lines.0[i].name));
                 } else {
-                    eco.say(&real, "No free bus in the depot: buy or service one in the Depot view");
+                    eco.say(
+                        &real,
+                        "No free bus in the depot: buy or service one in the Depot view",
+                    );
                 }
             }
             Action::RemoveBus(i) => {
@@ -648,7 +727,17 @@ fn game_actions(
                             bus.retire = true;
                         }
                     }
-                    eco.say(&real, format!("Bus taken off {}", lines.0.get(i).map(|l| l.name.as_str()).unwrap_or("the line")));
+                    eco.say(
+                        &real,
+                        format!(
+                            "Bus taken off {}",
+                            lines
+                                .0
+                                .get(i)
+                                .map(|l| l.name.as_str())
+                                .unwrap_or("the line")
+                        ),
+                    );
                 }
             }
             Action::Pause => {
@@ -670,7 +759,12 @@ fn game_actions(
     }
 }
 
-fn spawn_passengers(time: Res<Time>, clock: Res<GameClock>, map: Res<MapData>, mut queues: ResMut<StopQueues>) {
+fn spawn_passengers(
+    time: Res<Time>,
+    clock: Res<GameClock>,
+    map: Res<MapData>,
+    mut queues: ResMut<StopQueues>,
+) {
     let dt = time.delta_secs();
     let tod = ops::demand_factor(clock.minute_of_day());
     for (i, s) in map.stops.iter().enumerate() {
@@ -843,8 +937,14 @@ fn move_buses(
         }
         if worn_out && !bus.retire && bus.phase != Phase::Returning {
             bus.retire = true;
-            let plate = fleet.get(bus.fleet).map(|b| b.plate.clone()).unwrap_or_default();
-            eco.say(&real, format!("{plate} needs service and is returning to the depot"));
+            let plate = fleet
+                .get(bus.fleet)
+                .map(|b| b.plate.clone())
+                .unwrap_or_default();
+            eco.say(
+                &real,
+                format!("{plate} needs service and is returning to the depot"),
+            );
             if matches!(bus.phase, Phase::Running | Phase::Approach | Phase::Wait) {
                 let pos = tf.translation.truncate();
                 let home = lines.0.get(bus.line).and_then(|l| l.home_leg.clone());

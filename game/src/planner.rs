@@ -70,7 +70,9 @@ pub fn route_matches(map: &MapData, query: &str) -> Vec<usize> {
     map.routes
         .iter()
         .enumerate()
-        .filter(|(_, r)| q.is_empty() || r.ref_.to_lowercase().contains(&q) || r.name.to_lowercase().contains(&q))
+        .filter(|(_, r)| {
+            q.is_empty() || r.ref_.to_lowercase().contains(&q) || r.name.to_lowercase().contains(&q)
+        })
         .map(|(i, _)| i)
         .collect()
 }
@@ -114,7 +116,7 @@ pub fn spawn_planner_ui(mut commands: Commands) {
                 display: Display::None,
                 position_type: PositionType::Absolute,
                 top: Val::Px(76.0),
-                left: Val::Px(14.0),
+                left: Val::Px(crate::ui::SIDEBAR_W + 14.0),
                 width: Val::Px(310.0),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(14.0)),
@@ -129,7 +131,11 @@ pub fn spawn_planner_ui(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((
                 PlannerBody,
-                Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), ..default() },
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },
             ));
         });
 }
@@ -160,8 +166,12 @@ pub fn plan_click(
         return;
     }
     let (camera, gt, proj) = *cam;
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok(world) = camera.viewport_to_world_2d(gt, cursor) else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let Ok(world) = camera.viewport_to_world_2d(gt, cursor) else {
+        return;
+    };
     if let Some((node, pos)) = map.nearest_node(world, 30.0 * ortho_scale(proj)) {
         draft.0.push(Wp::Via { pos, node });
     }
@@ -233,7 +243,11 @@ pub fn planner_actions(
             Action::AdoptRoute(i) => {
                 if let Some(r) = map.routes.get(i) {
                     draft.0 = r.stops.iter().map(|&s| Wp::Stop(s)).collect();
-                    meta.name = Some(if r.ref_.is_empty() { r.name.clone() } else { format!("Line {}", r.ref_) });
+                    meta.name = Some(if r.ref_.is_empty() {
+                        r.name.clone()
+                    } else {
+                        format!("Line {}", r.ref_)
+                    });
                     meta.interval = r.interval_min;
                     if let Some(&s) = r.stops.first() {
                         cam.translation.x = map.stops[s].pos.x;
@@ -243,8 +257,12 @@ pub fn planner_actions(
                 }
             }
             Action::RoutePage(d) => {
-                let pages = route_matches(&map, &search.text).len().div_ceil(ROUTE_PAGE).max(1);
-                search.route_page = (search.route_page as i32 + d).clamp(0, pages as i32 - 1) as usize;
+                let pages = route_matches(&map, &search.text)
+                    .len()
+                    .div_ceil(ROUTE_PAGE)
+                    .max(1);
+                search.route_page =
+                    (search.route_page as i32 + d).clamp(0, pages as i32 - 1) as usize;
             }
             Action::DraftRemove(i) => {
                 if i < draft.0.len() {
@@ -324,7 +342,11 @@ pub fn draw_planner(
 
 /// Deeper green map while planning a route (like the route screen of the reference game).
 pub fn planner_background(tool: Res<Tool>, mut clear: ResMut<ClearColor>) {
-    let want = if *tool == Tool::Drawing { style::PLAN_BG } else { style::MAP_BG };
+    let want = if *tool == Tool::Drawing {
+        style::PLAN_BG
+    } else {
+        style::MAP_BG
+    };
     if clear.0 != want {
         clear.0 = want;
     }
@@ -344,11 +366,17 @@ pub fn rebuild_planner(
     body: Single<Entity, With<PlannerBody>>,
     mut panel: Single<&mut Node, (With<PlannerPanel>, Without<PlannerBody>)>,
 ) {
-    let want = if *tool == Tool::Drawing { Display::Flex } else { Display::None };
+    let want = if *tool == Tool::Drawing {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if panel.display != want {
         panel.display = want;
     }
-    if *tool != Tool::Drawing || !(draft.is_changed() || preview.is_changed() || search.is_changed() || tool.is_changed()) {
+    if *tool != Tool::Drawing
+        || !(draft.is_changed() || preview.is_changed() || search.is_changed() || tool.is_changed())
+    {
         return;
     }
 
@@ -381,7 +409,7 @@ pub fn rebuild_planner(
                 border: UiRect::all(Val::Px(if search.focus { 2.0 } else { 1.0 })),
                 ..default()
             },
-            BackgroundColor(style::WHITE),
+            BackgroundColor(style::INPUT),
             BorderColor(if search.focus { style::ACCENT } else { style::PANEL_BORDER }),
             BorderRadius::all(Val::Px(10.0)),
             children![text(f, false, 14.0, color, shown)],

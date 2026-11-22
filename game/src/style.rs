@@ -11,18 +11,27 @@ pub const MAP_BG: Color = rgb(0xcd, 0xeb, 0xb0); // OSM park/grass green
 
 pub const PLAN_BG: Color = rgb(0x9c, 0xd0, 0x80); // deeper green while planning a route
 
-// UI
-pub const PANEL: Color = Color::srgba(1.0, 1.0, 1.0, 0.96);
-pub const PANEL_BORDER: Color = rgb(0xc9, 0xd3, 0xc6);
-pub const TEXT: Color = rgb(0x1f, 0x2a, 0x24);
-pub const MUTED: Color = rgb(0x66, 0x72, 0x6a);
-pub const ACCENT: Color = rgb(0x2e, 0x7d, 0x32);
-pub const ACCENT_HOVER: Color = rgb(0x38, 0x8e, 0x3c);
-pub const ACCENT_PRESS: Color = rgb(0x26, 0x6b, 0x2a);
-pub const ACCENT_LIGHT: Color = rgb(0xdf, 0xf0, 0xdf);
-pub const DANGER: Color = rgb(0xc6, 0x28, 0x28);
-pub const BTN: Color = rgb(0xf4, 0xf6, 0xf4);
-pub const BTN_HOVER: Color = rgb(0xe6, 0xec, 0xe6);
-pub const BTN_PRESS: Color = rgb(0xd5, 0xde, 0xd5);
-pub const DARK: Color = Color::srgba(0.09, 0.12, 0.10, 0.94);
+// UI (dark theme: deep navy panels, bright green accent, amber highlights)
+pub const BG: Color = rgb(0x0b, 0x10, 0x18);
+pub const PANEL: Color = Color::srgba(0.075, 0.098, 0.133, 0.95);
+pub const PANEL_BORDER: Color = rgb(0x2b, 0x37, 0x48);
+pub const TEXT: Color = rgb(0xe8, 0xed, 0xf3);
+pub const MUTED: Color = rgb(0x8a, 0x98, 0xab);
+/// Bright green for lines, rings and positive numbers.
+pub const ACCENT: Color = rgb(0x4a, 0xd0, 0x7a);
+/// Filled primary buttons.
+pub const PRIMARY: Color = rgb(0x1f, 0x8f, 0x4e);
+pub const PRIMARY_HOVER: Color = rgb(0x27, 0xa5, 0x5c);
+pub const PRIMARY_PRESS: Color = rgb(0x18, 0x77, 0x40);
+/// Selected / active toggle background.
+pub const ACCENT_LIGHT: Color = rgb(0x1b, 0x3d, 0x2c);
+pub const AMBER: Color = rgb(0xff, 0xb4, 0x20);
+pub const DANGER: Color = rgb(0xff, 0x6b, 0x5e);
+pub const BTN: Color = rgb(0x1d, 0x27, 0x36);
+pub const BTN_HOVER: Color = rgb(0x28, 0x35, 0x49);
+pub const BTN_PRESS: Color = rgb(0x32, 0x42, 0x5b);
+pub const BTN_DISABLED: Color = rgb(0x15, 0x1c, 0x28);
+/// Text input background.
+pub const INPUT: Color = rgb(0x0e, 0x14, 0x1e);
+pub const DARK: Color = Color::srgba(0.04, 0.06, 0.09, 0.94);
 pub const WHITE: Color = Color::WHITE;

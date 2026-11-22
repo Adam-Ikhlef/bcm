@@ -48,7 +48,9 @@ fn asset_name() -> String {
 // --- Paths ------------------------------------------------------------------
 
 fn base_dir() -> PathBuf {
-    dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("BusManager")
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("BusManager")
 }
 
 fn app_dir() -> PathBuf {
@@ -57,7 +59,9 @@ fn app_dir() -> PathBuf {
 
 /// Where the game stores downloaded cities (same folder the game uses).
 fn user_data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("BusManager")
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("BusManager")
 }
 
 fn game_exe() -> PathBuf {
@@ -76,7 +80,9 @@ enum Installed {
 }
 
 fn installed_state() -> Installed {
-    let ver = fs::read_to_string(version_file()).ok().map(|s| s.trim().to_string());
+    let ver = fs::read_to_string(version_file())
+        .ok()
+        .map(|s| s.trim().to_string());
     match (game_exe().exists(), ver) {
         (true, Some(v)) => Installed::Yes(v),
         (true, None) => Installed::Yes("unknown".into()),
@@ -86,7 +92,10 @@ fn installed_state() -> Installed {
 }
 
 fn parse_ver(v: &str) -> Vec<u32> {
-    v.trim_start_matches('v').split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    v.trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse().unwrap_or(0))
+        .collect()
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
@@ -123,7 +132,10 @@ fn latest_release() -> Result<Release, String> {
         .and_then(|a| a.iter().find(|x| x["name"].as_str() == Some(want.as_str())))
         .and_then(|x| x["browser_download_url"].as_str())
         .ok_or_else(|| format!("release {tag} has no download for this system ({want})"))?;
-    Ok(Release { version: tag.trim_start_matches('v').to_string(), url: url.to_string() })
+    Ok(Release {
+        version: tag.trim_start_matches('v').to_string(),
+        url: url.to_string(),
+    })
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
@@ -143,7 +155,10 @@ fn extract_game(archive: &[u8]) -> Result<Vec<u8>, String> {
         let mut zip = zip::ZipArchive::new(Cursor::new(archive)).map_err(|e| e.to_string())?;
         for i in 0..zip.len() {
             let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
-            let is_game = Path::new(f.name()).file_name().map(|n| n == EXE).unwrap_or(false);
+            let is_game = Path::new(f.name())
+                .file_name()
+                .map(|n| n == EXE)
+                .unwrap_or(false);
             if is_game {
                 let mut out = Vec::new();
                 f.read_to_end(&mut out).map_err(|e| e.to_string())?;
@@ -186,7 +201,10 @@ fn run_hidden(cmd: &mut Command) {
 fn shortcut_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(d) = dirs::data_dir() {
-        v.push(d.join("Microsoft/Windows/Start Menu/Programs").join(format!("{APP_NAME}.lnk")));
+        v.push(
+            d.join("Microsoft/Windows/Start Menu/Programs")
+                .join(format!("{APP_NAME}.lnk")),
+        );
     }
     if let Some(d) = dirs::desktop_dir() {
         v.push(d.join(format!("{APP_NAME}.lnk")));
@@ -217,7 +235,15 @@ fn create_shortcuts(version: &str) {
         ("UninstallString", format!("\"{}\"", setup.display())),
     ];
     for (name, value) in entries {
-        run_hidden(Command::new("reg").args(["add", UNINSTALL_KEY, "/v", name, "/d", &value, "/f"]));
+        run_hidden(Command::new("reg").args([
+            "add",
+            UNINSTALL_KEY,
+            "/v",
+            name,
+            "/d",
+            &value,
+            "/f",
+        ]));
     }
 }
 
@@ -231,7 +257,10 @@ fn remove_shortcuts() {
 
 #[cfg(target_os = "macos")]
 fn mac_app() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join("Applications").join(format!("{APP_NAME}.app"))
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("Applications")
+        .join(format!("{APP_NAME}.app"))
 }
 
 #[cfg(target_os = "macos")]
@@ -243,7 +272,14 @@ fn create_shortcuts(version: &str) {
         return;
     }
     let launcher = macos.join("BusManager");
-    let _ = fs::write(&launcher, format!("#!/bin/sh\ncd \"{}\"\nexec \"{}\"\n", app_dir().display(), game_exe().display()));
+    let _ = fs::write(
+        &launcher,
+        format!(
+            "#!/bin/sh\ncd \"{}\"\nexec \"{}\"\n",
+            app_dir().display(),
+            game_exe().display()
+        ),
+    );
     let _ = fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755));
     let plist = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleName</key><string>{APP_NAME}</string>\n<key>CFBundleExecutable</key><string>BusManager</string>\n<key>CFBundleIdentifier</key><string>com.busmanager.game</string>\n<key>CFBundleVersion</key><string>{version}</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n</dict></plist>\n"
@@ -258,7 +294,10 @@ fn remove_shortcuts() {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn desktop_file() -> PathBuf {
-    dirs::data_dir().unwrap_or_default().join("applications").join("busmanager.desktop")
+    dirs::data_dir()
+        .unwrap_or_default()
+        .join("applications")
+        .join("busmanager.desktop")
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -328,7 +367,8 @@ fn install_files(r: &Reporter, label: &str) -> Result<String, String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755));
     }
-    fs::rename(&tmp, game_exe()).map_err(|e| format!("could not replace the game (is it still running?): {e}"))?;
+    fs::rename(&tmp, game_exe())
+        .map_err(|e| format!("could not replace the game (is it still running?): {e}"))?;
     fs::write(version_file(), &rel.version).map_err(|e| e.to_string())?;
 
     // Keep a copy of this installer next to the game so it can be used to repair/uninstall later.
@@ -357,7 +397,11 @@ fn uninstall(r: &Reporter, purge_data: bool) -> Result<String, String> {
             if Some(&p) == me.as_ref() {
                 continue; // a running program cannot delete itself on Windows
             }
-            let _ = if p.is_dir() { fs::remove_dir_all(&p) } else { fs::remove_file(&p) };
+            let _ = if p.is_dir() {
+                fs::remove_dir_all(&p)
+            } else {
+                fs::remove_file(&p)
+            };
         }
     }
     let running_from_app = me.as_ref().map(|m| m.starts_with(&dir)).unwrap_or(false);
@@ -365,7 +409,10 @@ fn uninstall(r: &Reporter, purge_data: bool) -> Result<String, String> {
         #[cfg(windows)]
         {
             // Delete the rest (this installer + folder) a moment after we exit.
-            let cmd = format!("ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"", dir.display());
+            let cmd = format!(
+                "ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"",
+                dir.display()
+            );
             run_detached_windows(&cmd);
         }
         #[cfg(not(windows))]
@@ -388,7 +435,10 @@ fn uninstall(r: &Reporter, purge_data: bool) -> Result<String, String> {
 fn run_detached_windows(cmd: &str) {
     use std::os::windows::process::CommandExt;
     // CREATE_NO_WINDOW | DETACHED_PROCESS
-    let _ = Command::new("cmd").args(["/C", cmd]).creation_flags(0x0800_0000 | 0x0000_0008).spawn();
+    let _ = Command::new("cmd")
+        .args(["/C", cmd])
+        .creation_flags(0x0800_0000 | 0x0000_0008)
+        .spawn();
 }
 
 fn run_job(job: Job, r: Reporter) {
@@ -447,7 +497,10 @@ impl App {
         self.outcome = None;
         self.confirm_uninstall = false;
         self.log.clear();
-        let reporter = Reporter { tx: self.tx.clone(), ctx: ctx.clone() };
+        let reporter = Reporter {
+            tx: self.tx.clone(),
+            ctx: ctx.clone(),
+        };
         std::thread::spawn(move || run_job(job, reporter));
     }
 
@@ -503,29 +556,50 @@ impl eframe::App for App {
 
             ui.horizontal(|ui| match self.installed.clone() {
                 Installed::No => {
-                    if ui.add_enabled(enabled && latest_ok, egui::Button::new("  Install  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled && latest_ok, egui::Button::new("  Install  "))
+                        .clicked()
+                    {
                         self.start(ctx, Job::Install);
                     }
                 }
                 Installed::Broken => {
-                    if ui.add_enabled(enabled && latest_ok, egui::Button::new("  Repair  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled && latest_ok, egui::Button::new("  Repair  "))
+                        .clicked()
+                    {
                         self.start(ctx, Job::Repair);
                     }
-                    if ui.add_enabled(enabled, egui::Button::new("  Uninstall  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled, egui::Button::new("  Uninstall  "))
+                        .clicked()
+                    {
                         self.confirm_uninstall = true;
                     }
                 }
                 Installed::Yes(_) => {
-                    if ui.add_enabled(enabled, egui::Button::new("  Play  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled, egui::Button::new("  Play  "))
+                        .clicked()
+                    {
                         self.launch();
                     }
-                    if ui.add_enabled(enabled && update_available, egui::Button::new("  Update  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled && update_available, egui::Button::new("  Update  "))
+                        .clicked()
+                    {
                         self.start(ctx, Job::Update);
                     }
-                    if ui.add_enabled(enabled && latest_ok, egui::Button::new("  Repair  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled && latest_ok, egui::Button::new("  Repair  "))
+                        .clicked()
+                    {
                         self.start(ctx, Job::Repair);
                     }
-                    if ui.add_enabled(enabled, egui::Button::new("  Uninstall  ")).clicked() {
+                    if ui
+                        .add_enabled(enabled, egui::Button::new("  Uninstall  "))
+                        .clicked()
+                    {
                         self.confirm_uninstall = true;
                     }
                 }
@@ -560,23 +634,31 @@ impl eframe::App for App {
                     ui.colored_label(egui::Color32::from_rgb(0x2e, 0x7d, 0x32), "Done.");
                 }
                 Some(Err(e)) => {
-                    ui.colored_label(egui::Color32::from_rgb(0xc6, 0x28, 0x28), format!("Failed: {e}"));
+                    ui.colored_label(
+                        egui::Color32::from_rgb(0xc6, 0x28, 0x28),
+                        format!("Failed: {e}"),
+                    );
                 }
                 None => {}
             }
             ui.add_space(6.0);
-            egui::ScrollArea::vertical().stick_to_bottom(true).max_height(160.0).show(ui, |ui| {
-                for line in &self.log {
-                    ui.label(egui::RichText::new(line).small().weak());
-                }
-            });
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .max_height(160.0)
+                .show(ui, |ui| {
+                    for line in &self.log {
+                        ui.label(egui::RichText::new(line).small().weak());
+                    }
+                });
         });
     }
 }
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([480.0, 420.0]).with_resizable(false),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([480.0, 420.0])
+            .with_resizable(false),
         ..Default::default()
     };
     eframe::run_native(

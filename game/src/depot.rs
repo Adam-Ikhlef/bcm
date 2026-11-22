@@ -55,7 +55,10 @@ pub fn setup_cameras(world: &mut World) {
     world.spawn((
         Camera2d,
         MapCamera,
-        Projection::Orthographic(OrthographicProjection { scale: 3.0, ..OrthographicProjection::default_2d() }),
+        Projection::Orthographic(OrthographicProjection {
+            scale: 3.0,
+            ..OrthographicProjection::default_2d()
+        }),
     ));
     world.spawn((
         Camera3d::default(),
@@ -67,7 +70,9 @@ pub fn setup_cameras(world: &mut World) {
             ..default()
         },
         Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::FixedVertical { viewport_height: 70.0 },
+            scaling_mode: ScalingMode::FixedVertical {
+                viewport_height: 70.0,
+            },
             ..OrthographicProjection::default_3d()
         }),
         Tonemapping::None,
@@ -76,7 +81,11 @@ pub fn setup_cameras(world: &mut World) {
     world.spawn((
         Camera2d,
         UiCamera,
-        Camera { order: 10, clear_color: ClearColorConfig::None, ..default() },
+        Camera {
+            order: 10,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
         IsDefaultUiCamera,
         RenderLayers::layer(31), // nothing is drawn on this layer: it only renders the UI
     ));
@@ -102,7 +111,13 @@ pub fn apply_view(
             c.is_active = !map;
         }
     }
-    let (m, d) = if map_ui_on { (Display::Flex, Display::None) } else if map { (Display::None, Display::None) } else { (Display::None, Display::Flex) };
+    let (m, d) = if map_ui_on {
+        (Display::Flex, Display::None)
+    } else if map {
+        (Display::None, Display::None)
+    } else {
+        (Display::None, Display::Flex)
+    };
     for mut n in &mut map_ui {
         if n.display != m {
             n.display = m;
@@ -134,8 +149,16 @@ pub fn exit_path(bay: usize) -> Vec<Vec3> {
     let p = bay_pos(bay);
     let lot_w = COLS as f32 * BAY_W + 10.0;
     let lot_d = 2.0 * BAY_L + LANE + 8.0;
-    let lane_z = if bay / COLS == 0 { 0.0 } else { lot_d / 2.0 - 2.0 };
-    vec![p, Vec3::new(p.x, 0.0, lane_z), Vec3::new(lot_w / 2.0 + 24.0, 0.0, lane_z)]
+    let lane_z = if bay / COLS == 0 {
+        0.0
+    } else {
+        lot_d / 2.0 - 2.0
+    };
+    vec![
+        p,
+        Vec3::new(p.x, 0.0, lane_z),
+        Vec3::new(lot_w / 2.0 + 24.0, 0.0, lane_z),
+    ]
 }
 
 pub fn exit_length(bay: usize) -> f32 {
@@ -145,7 +168,11 @@ pub fn exit_length(bay: usize) -> f32 {
 pub fn bay_pos(bay: usize) -> Vec3 {
     let col = (bay % COLS) as f32;
     let row = (bay / COLS) as f32;
-    Vec3::new((col - (COLS as f32 - 1.0) / 2.0) * BAY_W, 0.0, (row - 0.5) * (BAY_L + LANE))
+    Vec3::new(
+        (col - (COLS as f32 - 1.0) / 2.0) * BAY_W,
+        0.0,
+        (row - 0.5) * (BAY_L + LANE),
+    )
 }
 
 #[derive(Component)]
@@ -166,7 +193,10 @@ pub struct DepotView {
 
 impl Default for DepotView {
     fn default() -> Self {
-        Self { target: Vec3::new(-6.0, 0.0, -10.0), height: 40.0 }
+        Self {
+            target: Vec3::new(-6.0, 0.0, -10.0),
+            height: 40.0,
+        }
     }
 }
 
@@ -178,7 +208,12 @@ fn cam_rot() -> Quat {
 }
 
 fn solid(color: Color, rough: f32) -> StandardMaterial {
-    StandardMaterial { base_color: color, perceptual_roughness: rough, metallic: 0.0, ..default() }
+    StandardMaterial {
+        base_color: color,
+        perceptual_roughness: rough,
+        metallic: 0.0,
+        ..default()
+    }
 }
 
 pub fn spawn_depot_scene(
@@ -190,7 +225,10 @@ pub fn spawn_depot_scene(
 
     let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let trunk = meshes.add(Cylinder::new(0.35, 1.0));
-    let cone = meshes.add(Cone { radius: 1.0, height: 1.0 });
+    let cone = meshes.add(Cone {
+        radius: 1.0,
+        height: 1.0,
+    });
     let ball = meshes.add(Sphere::new(1.0));
 
     let grass = materials.add(solid(style::rgb(0x72, 0xa8, 0x55), 0.95));
@@ -209,18 +247,29 @@ pub fn spawn_depot_scene(
     let lot_w = COLS as f32 * BAY_W + 10.0;
     let lot_d = 2.0 * BAY_L + LANE + 8.0;
 
-    let mut place = |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, pos: Vec3, scale: Vec3| {
-        commands.spawn((
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(mat.clone()),
-            Transform::from_translation(pos).with_scale(scale),
-            GameWorld,
-        ));
-    };
+    let mut place =
+        |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, pos: Vec3, scale: Vec3| {
+            commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_translation(pos).with_scale(scale),
+                GameWorld,
+            ));
+        };
 
     // Ground
-    place(&cube, &grass, Vec3::new(0.0, -0.3, 0.0), Vec3::new(260.0, 0.4, 260.0));
-    place(&cube, &asphalt, Vec3::new(0.0, -0.05, 0.0), Vec3::new(lot_w, 0.2, lot_d));
+    place(
+        &cube,
+        &grass,
+        Vec3::new(0.0, -0.3, 0.0),
+        Vec3::new(260.0, 0.4, 260.0),
+    );
+    place(
+        &cube,
+        &asphalt,
+        Vec3::new(0.0, -0.05, 0.0),
+        Vec3::new(lot_w, 0.2, lot_d),
+    );
     // Curbs
     for (x, z, sx, sz) in [
         (0.0, lot_d / 2.0, lot_w + 0.6, 0.5),
@@ -236,26 +285,71 @@ pub fn spawn_depot_scene(
         let z = (row as f32 - 0.5) * (BAY_L + LANE);
         for i in 0..=COLS {
             let x = (i as f32 - COLS as f32 / 2.0) * BAY_W;
-            place(&cube, &line, Vec3::new(x, 0.06, z), Vec3::new(0.14, 0.02, BAY_L));
+            place(
+                &cube,
+                &line,
+                Vec3::new(x, 0.06, z),
+                Vec3::new(0.14, 0.02, BAY_L),
+            );
         }
-        place(&cube, &line, Vec3::new(0.0, 0.06, z - BAY_L / 2.0), Vec3::new(COLS as f32 * BAY_W, 0.02, 0.14));
+        place(
+            &cube,
+            &line,
+            Vec3::new(0.0, 0.06, z - BAY_L / 2.0),
+            Vec3::new(COLS as f32 * BAY_W, 0.02, 0.14),
+        );
     }
 
     // Garage building behind the lot (orange brick, like a real depot)
     let bz = -(lot_d / 2.0 + 9.0);
-    place(&cube, &brick, Vec3::new(0.0, 4.0, bz), Vec3::new(lot_w, 8.0, 14.0));
-    place(&cube, &roof, Vec3::new(0.0, 8.25, bz), Vec3::new(lot_w + 1.2, 0.5, 15.2));
+    place(
+        &cube,
+        &brick,
+        Vec3::new(0.0, 4.0, bz),
+        Vec3::new(lot_w, 8.0, 14.0),
+    );
+    place(
+        &cube,
+        &roof,
+        Vec3::new(0.0, 8.25, bz),
+        Vec3::new(lot_w + 1.2, 0.5, 15.2),
+    );
     for i in 0..4 {
         let x = (i as f32 - 1.5) * (lot_w / 4.2);
-        place(&cube, &gate, Vec3::new(x, 3.0, bz + 7.05), Vec3::new(5.0, 6.0, 0.15));
+        place(
+            &cube,
+            &gate,
+            Vec3::new(x, 3.0, bz + 7.05),
+            Vec3::new(5.0, 6.0, 0.15),
+        );
     }
-    place(&cube, &glass, Vec3::new(0.0, 7.0, bz + 7.05), Vec3::new(lot_w * 0.7, 1.0, 0.12));
+    place(
+        &cube,
+        &glass,
+        Vec3::new(0.0, 7.0, bz + 7.05),
+        Vec3::new(lot_w * 0.7, 1.0, 0.12),
+    );
 
     // Trees and bushes around the lot
     let mut tree = |x: f32, z: f32, s: f32| {
-        place(&trunk, &bark, Vec3::new(x, 1.1 * s, z), Vec3::new(s, 2.2 * s, s));
-        place(&cone, &pine_a, Vec3::new(x, 4.0 * s, z), Vec3::new(2.4 * s, 4.2 * s, 2.4 * s));
-        place(&cone, &pine_b, Vec3::new(x, 6.4 * s, z), Vec3::new(1.7 * s, 3.4 * s, 1.7 * s));
+        place(
+            &trunk,
+            &bark,
+            Vec3::new(x, 1.1 * s, z),
+            Vec3::new(s, 2.2 * s, s),
+        );
+        place(
+            &cone,
+            &pine_a,
+            Vec3::new(x, 4.0 * s, z),
+            Vec3::new(2.4 * s, 4.2 * s, 2.4 * s),
+        );
+        place(
+            &cone,
+            &pine_b,
+            Vec3::new(x, 6.4 * s, z),
+            Vec3::new(1.7 * s, 3.4 * s, 1.7 * s),
+        );
     };
     let ex = lot_w / 2.0 + 6.0;
     for (i, z) in [-26.0, -13.0, 0.0, 13.0, 26.0, 38.0].iter().enumerate() {
@@ -263,8 +357,19 @@ pub fn spawn_depot_scene(
         tree(ex, *z, s);
         tree(-ex - 1.5, *z + 4.0, 1.0 + (i % 2) as f32 * 0.2);
     }
-    for (x, z) in [(ex - 3.0, -8.0), (ex - 3.5, 9.0), (-ex + 3.0, 18.0), (-ex + 3.2, -18.0), (12.0, lot_d / 2.0 + 3.5)] {
-        place(&ball, &bush, Vec3::new(x, 0.55, z), Vec3::new(1.6, 1.1, 1.6));
+    for (x, z) in [
+        (ex - 3.0, -8.0),
+        (ex - 3.5, 9.0),
+        (-ex + 3.0, 18.0),
+        (-ex + 3.2, -18.0),
+        (12.0, lot_d / 2.0 + 3.5),
+    ] {
+        place(
+            &ball,
+            &bush,
+            Vec3::new(x, 0.55, z),
+            Vec3::new(1.6, 1.1, 1.6),
+        );
     }
 
     // --- Surroundings: main street, side street, intersection, sidewalks, buildings, lamps ---
@@ -306,30 +411,70 @@ pub fn spawn_depot_scene(
     let reach = 125.0;
 
     // Sidewalks first (slightly higher), then asphalt on top where roads cross them.
-    place(&cube, &paving, Vec3::new(0.0, 0.03, zs), Vec3::new(2.0 * reach, 0.16, street_w + 2.0 * sw));
-    place(&cube, &paving, Vec3::new(xs, 0.03, 0.0), Vec3::new(street_w + 2.0 * sw, 0.16, 2.0 * reach));
-    place(&cube, &road, Vec3::new(0.0, 0.07, zs), Vec3::new(2.0 * reach, 0.16, street_w));
-    place(&cube, &road, Vec3::new(xs, 0.07, 0.0), Vec3::new(street_w, 0.16, 2.0 * reach));
+    place(
+        &cube,
+        &paving,
+        Vec3::new(0.0, 0.03, zs),
+        Vec3::new(2.0 * reach, 0.16, street_w + 2.0 * sw),
+    );
+    place(
+        &cube,
+        &paving,
+        Vec3::new(xs, 0.03, 0.0),
+        Vec3::new(street_w + 2.0 * sw, 0.16, 2.0 * reach),
+    );
+    place(
+        &cube,
+        &road,
+        Vec3::new(0.0, 0.07, zs),
+        Vec3::new(2.0 * reach, 0.16, street_w),
+    );
+    place(
+        &cube,
+        &road,
+        Vec3::new(xs, 0.07, 0.0),
+        Vec3::new(street_w, 0.16, 2.0 * reach),
+    );
     // Depot driveway
-    place(&cube, &road, Vec3::new(0.0, 0.06, (lot_d / 2.0 + zs - street_w / 2.0) / 2.0), Vec3::new(14.0, 0.16, zs - street_w / 2.0 - lot_d / 2.0 + 0.2));
+    place(
+        &cube,
+        &road,
+        Vec3::new(0.0, 0.06, (lot_d / 2.0 + zs - street_w / 2.0) / 2.0),
+        Vec3::new(14.0, 0.16, zs - street_w / 2.0 - lot_d / 2.0 + 0.2),
+    );
     // Yard exits to the side street (buses leave along the middle lane and the front apron)
     for z in [0.0, lot_d / 2.0 - 2.0] {
         let x0 = lot_w / 2.0 - 1.0;
         let x1 = xs - street_w / 2.0 + 0.5;
-        place(&cube, &road, Vec3::new((x0 + x1) / 2.0, 0.065, z), Vec3::new(x1 - x0, 0.16, 8.0));
+        place(
+            &cube,
+            &road,
+            Vec3::new((x0 + x1) / 2.0, 0.065, z),
+            Vec3::new(x1 - x0, 0.16, 8.0),
+        );
     }
     // Lane markings (dashed), skipped inside the intersection
     let mut x = -reach + 3.0;
     while x < reach - 3.0 {
         if (x - xs).abs() > street_w / 2.0 + 6.5 {
-            place(&cube, &paint, Vec3::new(x, 0.16, zs), Vec3::new(3.0, 0.02, 0.2));
+            place(
+                &cube,
+                &paint,
+                Vec3::new(x, 0.16, zs),
+                Vec3::new(3.0, 0.02, 0.2),
+            );
         }
         x += 7.0;
     }
     let mut z = -reach + 3.0;
     while z < reach - 3.0 {
         if (z - zs).abs() > street_w / 2.0 + 6.5 {
-            place(&cube, &paint, Vec3::new(xs, 0.16, z), Vec3::new(0.2, 0.02, 3.0));
+            place(
+                &cube,
+                &paint,
+                Vec3::new(xs, 0.16, z),
+                Vec3::new(0.2, 0.02, 3.0),
+            );
         }
         z += 7.0;
     }
@@ -337,22 +482,72 @@ pub fn spawn_depot_scene(
     for i in 0..6 {
         let o = (i as f32 - 2.5) * 1.6;
         let reach_c = street_w / 2.0 + 2.5;
-        place(&cube, &paint, Vec3::new(xs + o, 0.17, zs - reach_c), Vec3::new(0.9, 0.02, 3.0));
-        place(&cube, &paint, Vec3::new(xs + o, 0.17, zs + reach_c), Vec3::new(0.9, 0.02, 3.0));
-        place(&cube, &paint, Vec3::new(xs - reach_c, 0.17, zs + o), Vec3::new(3.0, 0.02, 0.9));
-        place(&cube, &paint, Vec3::new(xs + reach_c, 0.17, zs + o), Vec3::new(3.0, 0.02, 0.9));
+        place(
+            &cube,
+            &paint,
+            Vec3::new(xs + o, 0.17, zs - reach_c),
+            Vec3::new(0.9, 0.02, 3.0),
+        );
+        place(
+            &cube,
+            &paint,
+            Vec3::new(xs + o, 0.17, zs + reach_c),
+            Vec3::new(0.9, 0.02, 3.0),
+        );
+        place(
+            &cube,
+            &paint,
+            Vec3::new(xs - reach_c, 0.17, zs + o),
+            Vec3::new(3.0, 0.02, 0.9),
+        );
+        place(
+            &cube,
+            &paint,
+            Vec3::new(xs + reach_c, 0.17, zs + o),
+            Vec3::new(3.0, 0.02, 0.9),
+        );
     }
     // Stop lines
-    place(&cube, &paint, Vec3::new(xs - street_w / 2.0 - 5.2, 0.17, zs + street_w / 4.0), Vec3::new(0.4, 0.02, street_w / 2.0 - 0.6));
-    place(&cube, &yellow, Vec3::new(xs, 0.17, zs), Vec3::new(1.0, 0.02, 1.0));
+    place(
+        &cube,
+        &paint,
+        Vec3::new(xs - street_w / 2.0 - 5.2, 0.17, zs + street_w / 4.0),
+        Vec3::new(0.4, 0.02, street_w / 2.0 - 0.6),
+    );
+    place(
+        &cube,
+        &yellow,
+        Vec3::new(xs, 0.17, zs),
+        Vec3::new(1.0, 0.02, 1.0),
+    );
     // Depot gate markings
-    place(&cube, &yellow, Vec3::new(-7.4, 0.17, lot_d / 2.0 + 3.0), Vec3::new(0.2, 0.02, 4.0));
-    place(&cube, &yellow, Vec3::new(7.4, 0.17, lot_d / 2.0 + 3.0), Vec3::new(0.2, 0.02, 4.0));
+    place(
+        &cube,
+        &yellow,
+        Vec3::new(-7.4, 0.17, lot_d / 2.0 + 3.0),
+        Vec3::new(0.2, 0.02, 4.0),
+    );
+    place(
+        &cube,
+        &yellow,
+        Vec3::new(7.4, 0.17, lot_d / 2.0 + 3.0),
+        Vec3::new(0.2, 0.02, 4.0),
+    );
 
     // Street lamps along both sides of the main street and the side street
     let mut lamp = |x: f32, z: f32| {
-        place(&trunk, &lamp_mat, Vec3::new(x, 2.7, z), Vec3::new(0.35, 5.4, 0.35));
-        place(&cube, &lamp_glow, Vec3::new(x, 5.5, z), Vec3::new(0.9, 0.18, 0.5));
+        place(
+            &trunk,
+            &lamp_mat,
+            Vec3::new(x, 2.7, z),
+            Vec3::new(0.35, 5.4, 0.35),
+        );
+        place(
+            &cube,
+            &lamp_glow,
+            Vec3::new(x, 5.5, z),
+            Vec3::new(0.9, 0.18, 0.5),
+        );
     };
     let mut lx = -reach + 10.0;
     while lx < reach - 10.0 {
@@ -396,8 +591,18 @@ pub fn spawn_depot_scene(
     ];
     for (i, (bx, bz2, w, dp, floors, wall, face)) in blocks.iter().enumerate() {
         let h = *floors as f32 * 3.2;
-        place(&cube, &walls[*wall], Vec3::new(*bx, h / 2.0, *bz2), Vec3::new(*w, h, *dp));
-        place(&cube, &roofs[i % 2], Vec3::new(*bx, h + 0.25, *bz2), Vec3::new(*w + 0.6, 0.5, *dp + 0.6));
+        place(
+            &cube,
+            &walls[*wall],
+            Vec3::new(*bx, h / 2.0, *bz2),
+            Vec3::new(*w, h, *dp),
+        );
+        place(
+            &cube,
+            &roofs[i % 2],
+            Vec3::new(*bx, h + 0.25, *bz2),
+            Vec3::new(*w + 0.6, 0.5, *dp + 0.6),
+        );
         // Window grid on the street-facing wall
         let cols = (*w / 3.0).floor() as i32;
         for f in 0..*floors {
@@ -405,18 +610,43 @@ pub fn spawn_depot_scene(
                 let wx = bx + (c as f32 - (cols as f32 - 1.0) / 2.0) * 3.0;
                 let lit = (i as u32 * 7 + f * 3 + c as u32 * 5) % 6 == 0;
                 let m = if lit { &win_lit } else { &win };
-                place(&cube, m, Vec3::new(wx, 2.2 + f as f32 * 3.2, bz2 + face * (*dp / 2.0 + 0.04)), Vec3::new(1.5, 1.5, 0.1));
+                place(
+                    &cube,
+                    m,
+                    Vec3::new(wx, 2.2 + f as f32 * 3.2, bz2 + face * (*dp / 2.0 + 0.04)),
+                    Vec3::new(1.5, 1.5, 0.1),
+                );
             }
         }
         // Shop awning / door on ground floor
-        place(&cube, &roofs[(i + 1) % 2], Vec3::new(*bx, 3.3, bz2 + face * (*dp / 2.0 + 0.6)), Vec3::new(*w * 0.6, 0.18, 1.2));
+        place(
+            &cube,
+            &roofs[(i + 1) % 2],
+            Vec3::new(*bx, 3.3, bz2 + face * (*dp / 2.0 + 0.6)),
+            Vec3::new(*w * 0.6, 0.18, 1.2),
+        );
     }
     // Trees on the sidewalks
     for tx in [-60.0, -38.0, -16.0, 20.0, 44.0] {
         let (tz, s) = (zs + street_w / 2.0 + 1.6, 0.7);
-        place(&trunk, &bark, Vec3::new(tx, 1.1 * s, tz), Vec3::new(s, 2.2 * s, s));
-        place(&cone, &pine_a, Vec3::new(tx, 4.0 * s, tz), Vec3::new(2.4 * s, 4.2 * s, 2.4 * s));
-        place(&cone, &pine_b, Vec3::new(tx, 6.4 * s, tz), Vec3::new(1.7 * s, 3.4 * s, 1.7 * s));
+        place(
+            &trunk,
+            &bark,
+            Vec3::new(tx, 1.1 * s, tz),
+            Vec3::new(s, 2.2 * s, s),
+        );
+        place(
+            &cone,
+            &pine_a,
+            Vec3::new(tx, 4.0 * s, tz),
+            Vec3::new(2.4 * s, 4.2 * s, 2.4 * s),
+        );
+        place(
+            &cone,
+            &pine_b,
+            Vec3::new(tx, 6.4 * s, tz),
+            Vec3::new(1.7 * s, 3.4 * s, 1.7 * s),
+        );
     }
 
     // Selection marker (moved under the selected bus)
@@ -437,15 +667,28 @@ pub fn spawn_depot_scene(
 
     // Sun
     commands.spawn((
-        DirectionalLight { illuminance: 7_500.0, shadows_enabled: true, ..default() },
-        CascadeShadowConfigBuilder { maximum_distance: 300.0, first_cascade_far_bound: 80.0, ..default() }.build(),
+        DirectionalLight {
+            illuminance: 7_500.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        CascadeShadowConfigBuilder {
+            maximum_distance: 300.0,
+            first_cascade_far_bound: 80.0,
+            ..default()
+        }
+        .build(),
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.95, 0.35, 0.0)),
         GameWorld,
     ));
 }
 
 pub fn install_lighting(world: &mut World) {
-    world.insert_resource(AmbientLight { color: Color::srgb(0.85, 0.9, 1.0), brightness: 300.0, ..default() });
+    world.insert_resource(AmbientLight {
+        color: Color::srgb(0.85, 0.9, 1.0),
+        brightness: 300.0,
+        ..default()
+    });
 }
 
 pub fn install_depot(world: &mut World) {
@@ -507,7 +750,9 @@ pub fn depot_camera(
     tf.rotation = rot;
     tf.translation = view.target + rot * Vec3::Z * 200.0;
     if let Projection::Orthographic(o) = &mut *proj {
-        o.scaling_mode = ScalingMode::FixedVertical { viewport_height: view.height };
+        o.scaling_mode = ScalingMode::FixedVertical {
+            viewport_height: view.height,
+        };
     }
 }
 
@@ -530,8 +775,12 @@ pub fn sync_depot_buses(
     }
     *last = Some(fleet.version);
 
-    let wanted: Vec<(u32, usize)> =
-        fleet.buses.iter().filter(|b| b.line.is_none()).filter_map(|b| b.bay.map(|bay| (b.id, bay))).collect();
+    let wanted: Vec<(u32, usize)> = fleet
+        .buses
+        .iter()
+        .filter(|b| b.line.is_none())
+        .filter_map(|b| b.bay.map(|bay| (b.id, bay)))
+        .collect();
 
     for (e, d) in &existing {
         if !wanted.iter().any(|(id, _)| *id == d.0) {
@@ -598,7 +847,10 @@ pub fn update_depot_hover(
         let spec = &catalog.0[b.spec];
         let c = bay_pos(bay);
         let half = Vec3::new(spec.width / 2.0, spec.height / 2.0, spec.length / 2.0);
-        let (min, max) = (c + Vec3::new(-half.x, 0.0, -half.z), c + Vec3::new(half.x, spec.height, half.z));
+        let (min, max) = (
+            c + Vec3::new(-half.x, 0.0, -half.z),
+            c + Vec3::new(half.x, spec.height, half.z),
+        );
         if let Some(t) = ray_aabb(ray.origin, *ray.direction, min, max) {
             if best.is_none_or(|(bt, _)| t < bt) {
                 best = Some((t, b.id));
@@ -659,16 +911,35 @@ const CARD_W: f32 = 176.0;
 
 fn bar_row(f: &UiFonts, id: u32, label: &str, kind: BarKind) -> impl Bundle {
     (
-        Node { align_items: AlignItems::Center, column_gap: Val::Px(6.0), ..default() },
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            ..default()
+        },
         children![
-            (Node { width: Val::Px(64.0), ..default() }, children![text(f, false, 11.0, style::MUTED, label.to_string())]),
             (
-                Node { width: Val::Px(78.0), height: Val::Px(8.0), overflow: Overflow::clip(), ..default() },
+                Node {
+                    width: Val::Px(64.0),
+                    ..default()
+                },
+                children![text(f, false, 11.0, style::MUTED, label.to_string())]
+            ),
+            (
+                Node {
+                    width: Val::Px(78.0),
+                    height: Val::Px(8.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
                 BackgroundColor(style::rgb(0xe3, 0xe8, 0xe3)),
                 BorderRadius::all(Val::Px(4.0)),
                 children![(
                     BarFill(id, kind),
-                    Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..default()
+                    },
                     BackgroundColor(style::ACCENT),
                 )]
             ),
@@ -676,7 +947,14 @@ fn bar_row(f: &UiFonts, id: u32, label: &str, kind: BarKind) -> impl Bundle {
     )
 }
 
-fn spawn_card(commands: &mut Commands, f: &UiFonts, id: u32, plate: &str, model: &str, capacity: f32) {
+fn spawn_card(
+    commands: &mut Commands,
+    f: &UiFonts,
+    id: u32,
+    plate: &str,
+    model: &str,
+    capacity: f32,
+) {
     commands.spawn((
         GameUi,
         BusCard(id),
@@ -694,7 +972,7 @@ fn spawn_card(commands: &mut Commands, f: &UiFonts, id: u32, plate: &str, model:
             row_gap: Val::Px(3.0),
             ..default()
         },
-        BackgroundColor(style::WHITE),
+        BackgroundColor(style::INPUT),
         BorderColor(style::ACCENT),
         BorderRadius::all(Val::Px(9.0)),
         children![
@@ -710,11 +988,20 @@ fn spawn_card(commands: &mut Commands, f: &UiFonts, id: u32, plate: &str, model:
                 },
                 children![
                     text(f, false, 11.0, style::MUTED, model.to_string()),
-                    text(f, false, 11.0, style::MUTED, format!("max. {} passengers", capacity as i32)),
+                    text(
+                        f,
+                        false,
+                        11.0,
+                        style::MUTED,
+                        format!("max. {} passengers", capacity as i32)
+                    ),
                     bar_row(f, id, "Fuel", BarKind::Fuel),
                     bar_row(f, id, "Condition", BarKind::Condition),
                     bar_row(f, id, "Cleanliness", BarKind::Clean),
-                    (StatusLabel(id), text(f, true, 11.0, style::ACCENT, "Operational")),
+                    (
+                        StatusLabel(id),
+                        text(f, true, 11.0, style::ACCENT, "Operational")
+                    ),
                 ]
             ),
         ],
@@ -744,7 +1031,14 @@ pub fn sync_cards(
             continue;
         }
         let spec = &catalog.0[b.spec];
-        spawn_card(&mut commands, &fonts, b.id, &b.plate, &spec.name, spec.capacity);
+        spawn_card(
+            &mut commands,
+            &fonts,
+            b.id,
+            &b.plate,
+            &spec.name,
+            spec.capacity,
+        );
     }
 }
 
@@ -767,9 +1061,15 @@ pub fn update_cards(
     selected: Res<Selected>,
     hover: Res<DepotHover>,
     dview: Res<DepotView>,
-    mut cards: Query<(&BusCard, &mut Node, &mut BorderColor), (Without<CardDetails>, Without<BarFill>)>,
+    mut cards: Query<
+        (&BusCard, &mut Node, &mut BorderColor),
+        (Without<CardDetails>, Without<BarFill>),
+    >,
     mut details: Query<(&CardDetails, &mut Node), (Without<BusCard>, Without<BarFill>)>,
-    mut bars: Query<(&BarFill, &mut Node, &mut BackgroundColor), (Without<BusCard>, Without<CardDetails>)>,
+    mut bars: Query<
+        (&BarFill, &mut Node, &mut BackgroundColor),
+        (Without<BusCard>, Without<CardDetails>),
+    >,
     mut statuses: Query<(&StatusLabel, &mut Text, &mut TextColor)>,
 ) {
     let (camera, gt) = *cam;
@@ -807,7 +1107,11 @@ pub fn update_cards(
         }
     }
     for (d, mut node) in &mut details {
-        let want = if expanded(d.0) { Display::Flex } else { Display::None };
+        let want = if expanded(d.0) {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if node.display != want {
             node.display = want;
         }
@@ -866,16 +1170,32 @@ pub fn spawn_depot_ui(mut commands: Commands) {
         BackgroundColor(style::PANEL),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(14.0)),
-        children![(DepotBody, Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(12.0), ..default() })],
+        children![(
+            DepotBody,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(12.0),
+                ..default()
+            }
+        )],
     ));
 }
 
 fn stat_line(f: &UiFonts, label: &str, v: f32) -> impl Bundle {
     (
-        Node { justify_content: JustifyContent::SpaceBetween, ..default() },
+        Node {
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        },
         children![
             text(f, false, 12.0, style::MUTED, label.to_string()),
-            text(f, true, 12.0, level_color(v), format!("{}%", v.round() as i32)),
+            text(
+                f,
+                true,
+                12.0,
+                level_color(v),
+                format!("{}%", v.round() as i32)
+            ),
         ],
     )
 }
@@ -906,10 +1226,23 @@ pub fn rebuild_panel(
     commands.entity(body).with_children(|p| {
         let parked = fleet.buses.iter().filter(|b| b.line.is_none()).count();
         p.spawn((
-            Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Baseline, ..default() },
+            Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Baseline,
+                ..default()
+            },
             children![
                 text(f, true, 16.0, style::TEXT, "Depot"),
-                text(f, false, 12.0, style::MUTED, format!("{} buses · {parked} parked · {BAYS} bays", fleet.buses.len())),
+                text(
+                    f,
+                    false,
+                    12.0,
+                    style::MUTED,
+                    format!(
+                        "{} buses · {parked} parked · {BAYS} bays",
+                        fleet.buses.len()
+                    )
+                ),
             ],
         ));
 
@@ -930,7 +1263,13 @@ pub fn rebuild_panel(
                     BorderRadius::all(Val::Px(10.0)),
                     children![
                         text(f, true, 15.0, style::TEXT, b.plate.clone()),
-                        text(f, false, 12.0, style::MUTED, format!("{} · max. {} passengers", spec.name, spec.capacity as i32)),
+                        text(
+                            f,
+                            false,
+                            12.0,
+                            style::MUTED,
+                            format!("{} · max. {} passengers", spec.name, spec.capacity as i32)
+                        ),
                         text(
                             f,
                             true,
@@ -938,56 +1277,119 @@ pub fn rebuild_panel(
                             style::TEXT,
                             match b.assigned {
                                 Some(l) => format!("Assigned to line {}", l + 1),
-                                None => "Not assigned to a line (use “+ Bus” on the map)".to_string(),
+                                None =>
+                                    "Not assigned to a line (use “+ Bus” on the map)".to_string(),
                             }
                         ),
                         stat_line(f, "Fuel", b.fuel),
                         stat_line(f, "Condition", b.condition),
                         stat_line(f, "Cleanliness", b.clean),
                         (
-                            Node { column_gap: Val::Px(8.0), margin: UiRect::top(Val::Px(4.0)), ..default() },
+                            Node {
+                                column_gap: Val::Px(8.0),
+                                margin: UiRect::top(Val::Px(4.0)),
+                                ..default()
+                            },
                             children![
-                                button(f, format!("Service  {}", fmt_money(b.service_cost())), Action::Service(b.id), BtnKind::Small),
-                                button(f, format!("Sell  {}", fmt_money(spec.price * 0.6)), Action::Sell(b.id), BtnKind::Small),
+                                button(
+                                    f,
+                                    format!("Service  {}", fmt_money(b.service_cost())),
+                                    Action::Service(b.id),
+                                    BtnKind::Small
+                                ),
+                                button(
+                                    f,
+                                    format!("Sell  {}", fmt_money(spec.price * 0.6)),
+                                    Action::Sell(b.id),
+                                    BtnKind::Small
+                                ),
                             ]
                         ),
                     ],
                 ));
             }
             None => {
-                p.spawn(text(f, false, 12.0, style::MUTED, "Click a bus to see details, service or sell it."));
+                p.spawn(text(
+                    f,
+                    false,
+                    12.0,
+                    style::MUTED,
+                    "Click a bus to see details, service or sell it.",
+                ));
             }
         }
 
         // Shop
         p.spawn(text(f, true, 12.0, style::MUTED, "FLEET SHOP"));
-        p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), ..default() })
-            .with_children(|row| {
-                for c in Category::ALL {
-                    let kind = if c == tab.0 { BtnKind::Primary } else { BtnKind::Small };
-                    row.spawn(button(f, c.label(), Action::ShopTab(c), kind));
-                }
-            });
+        p.spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(4.0),
+            row_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|row| {
+            for c in Category::ALL {
+                let kind = if c == tab.0 {
+                    BtnKind::Primary
+                } else {
+                    BtnKind::Small
+                };
+                row.spawn(button(f, c.label(), Action::ShopTab(c), kind));
+            }
+        });
         let mut shown = 0;
-        for (i, spec) in catalog.0.iter().enumerate().filter(|(_, s)| s.category == tab.0) {
+        for (i, spec) in catalog
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.category == tab.0)
+        {
             shown += 1;
             let tag = if spec.is_mod { " (mod)" } else { "" };
             p.spawn((
-                Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() },
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
                 children![
                     (
-                        Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() },
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            flex_grow: 1.0,
+                            ..default()
+                        },
                         children![
                             text(f, true, 13.0, style::TEXT, format!("{}{tag}", spec.name)),
-                            text(f, false, 11.0, style::MUTED, format!("{} passengers · {:.0} m", spec.capacity as i32, spec.length)),
+                            text(
+                                f,
+                                false,
+                                11.0,
+                                style::MUTED,
+                                format!(
+                                    "{} passengers · {:.0} m",
+                                    spec.capacity as i32, spec.length
+                                )
+                            ),
                         ]
                     ),
-                    button(f, format!("Buy  {}", fmt_money(spec.price)), Action::Buy(i), BtnKind::Small),
+                    button(
+                        f,
+                        format!("Buy  {}", fmt_money(spec.price)),
+                        Action::Buy(i),
+                        BtnKind::Small
+                    ),
                 ],
             ));
         }
         if shown == 0 {
-            p.spawn(text(f, false, 11.0, style::MUTED, "No buses in this category."));
+            p.spawn(text(
+                f,
+                false,
+                11.0,
+                style::MUTED,
+                "No buses in this category.",
+            ));
         }
     });
 }
@@ -1010,11 +1412,20 @@ pub fn depot_actions(
             Action::SelectBus(id) => selected.0 = Some(id),
             Action::ShopTab(c) => tab.0 = c,
             Action::Buy(i) => {
-                let Some(spec) = catalog.0.get(i) else { continue };
+                let Some(spec) = catalog.0.get(i) else {
+                    continue;
+                };
                 if fleet.buses.len() >= BAYS {
                     eco.say(&real, "The depot is full: sell a bus first");
                 } else if eco.money < spec.price {
-                    eco.say(&real, format!("Not enough money: {} costs {}", spec.name, fmt_money(spec.price)));
+                    eco.say(
+                        &real,
+                        format!(
+                            "Not enough money: {} costs {}",
+                            spec.name,
+                            fmt_money(spec.price)
+                        ),
+                    );
                 } else if let Some(id) = fleet.add(i) {
                     eco.money -= spec.price;
                     selected.0 = Some(id);
@@ -1030,7 +1441,10 @@ pub fn depot_actions(
                 if cost < 0.5 {
                     eco.say(&real, "This bus does not need service");
                 } else if eco.money < cost {
-                    eco.say(&real, format!("Not enough money: service costs {}", fmt_money(cost)));
+                    eco.say(
+                        &real,
+                        format!("Not enough money: service costs {}", fmt_money(cost)),
+                    );
                 } else {
                     eco.money -= cost;
                     eco.costs += cost;
@@ -1060,12 +1474,13 @@ pub fn depot_actions(
     }
 }
 
-
 /// Drives departing buses out of their bays in the 3D depot.
 pub fn animate_departures(fleet: Res<Fleet>, mut q: Query<(&DepotBus, &mut Transform)>) {
     for (d, mut tf) in &mut q {
         let Some(b) = fleet.get(d.0) else { continue };
-        let (Some(bay), Some(dep)) = (b.bay, b.depart) else { continue };
+        let (Some(bay), Some(dep)) = (b.bay, b.depart) else {
+            continue;
+        };
         let path = exit_path(bay);
         let mut dist = dep.elapsed * crate::dispatch::EXIT_SPEED;
         let mut heading = Vec3::Z;

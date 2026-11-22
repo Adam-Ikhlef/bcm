@@ -1,24 +1,16 @@
-## Summary
+## What does this change?
 
+<!-- One or two sentences. Link the issue it closes: "Closes #123". -->
 
+## How was it tested?
 
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New gameplay / simulation feature (e.g., demand, timetables, economy, save/load)
-- [ ] OpenStreetMap parsing / map rendering / UI change
-- [ ] Installer (`busmanager-installer`) change (install, update, repair, uninstall)
-- [ ] Dependency update (`Cargo.toml` / `Cargo.lock`)
-- [ ] CI / release workflow / documentation update
-
-## How to Test
-
-
+- [ ] `cargo test --workspace`
+- [ ] Ran the game and checked the change on screen (attach a screenshot for UI/graphics changes)
+- [ ] Tested on: Windows / macOS / Linux (strike out what you did not test)
 
 ## Checklist
 
-- [ ] `cargo check --workspace` (or `cargo build --release -p busmanager` / `-p busmanager-installer`) builds cleanly without new warnings.
-- [ ] Tested with OpenStreetMap city download and/or a local `.osm.pbf` extract (if map/simulation logic was touched).
-- [ ] Tested `BUSMANAGER_REPO=...` build / release asset expectations (if `busmanager-installer` was touched).
-- [ ] Verified on target platform(s) where applicable (Windows / macOS / Ubuntu).
-- [ ] `README.md` or roadmap checkboxes updated if user-facing behavior or controls changed.
+- [ ] Everything (code comments, commit messages, text in the PR) is in English
+- [ ] No copyrighted assets from other games (art, fonts, logos, sounds) are included
+- [ ] New player-visible text is short and consistent with the rest of the UI
+- [ ] README or docs updated if behaviour changed

@@ -21,7 +21,10 @@ pub struct GameClock {
 
 impl Default for GameClock {
     fn default() -> Self {
-        Self { abs: START_MINUTE, last_day: 0 }
+        Self {
+            abs: START_MINUTE,
+            last_day: 0,
+        }
     }
 }
 
@@ -62,7 +65,11 @@ pub struct Timetable {
 
 impl Default for Timetable {
     fn default() -> Self {
-        Self { first: 6 * 60, last: 20 * 60 + 30, interval: 15 }
+        Self {
+            first: 6 * 60,
+            last: 20 * 60 + 30,
+            interval: 15,
+        }
     }
 }
 
@@ -173,13 +180,14 @@ pub struct Staff {
 }
 
 const FIRST: [&str; 24] = [
-    "Amir", "Lena", "Tomás", "Priya", "Jonas", "Yasmin", "Marek", "Aiko", "Omar", "Clara", "Diego", "Nadia",
-    "Pavel", "Sofia", "Karim", "Ingrid", "Luca", "Hana", "Ravi", "Elena", "Mateo", "Salma", "Viktor", "Mei",
+    "Amir", "Lena", "Tomás", "Priya", "Jonas", "Yasmin", "Marek", "Aiko", "Omar", "Clara", "Diego",
+    "Nadia", "Pavel", "Sofia", "Karim", "Ingrid", "Luca", "Hana", "Ravi", "Elena", "Mateo",
+    "Salma", "Viktor", "Mei",
 ];
 const LAST: [&str; 24] = [
-    "Berg", "Okafor", "Silva", "Novak", "Haddad", "Larsen", "Costa", "Ivanov", "Tanaka", "Rossi", "Mendes",
-    "Kowalski", "Aziz", "Fischer", "Moreau", "Singh", "Duarte", "Nilsson", "Benali", "Park", "Hoffman",
-    "Alves", "Ricci", "Demir",
+    "Berg", "Okafor", "Silva", "Novak", "Haddad", "Larsen", "Costa", "Ivanov", "Tanaka", "Rossi",
+    "Mendes", "Kowalski", "Aziz", "Fischer", "Moreau", "Singh", "Duarte", "Nilsson", "Benali",
+    "Park", "Hoffman", "Alves", "Ricci", "Demir",
 ];
 
 fn mix(mut x: u64) -> u64 {
@@ -200,7 +208,11 @@ impl Staff {
         let skill = 1 + (mix(r) % 5) as u8;
         let d = Driver {
             id: self.next_id,
-            name: format!("{} {}", FIRST[(r % 24) as usize], LAST[((r >> 8) % 24) as usize]),
+            name: format!(
+                "{} {}",
+                FIRST[(r % 24) as usize],
+                LAST[((r >> 8) % 24) as usize]
+            ),
             skill,
             shift,
             wage: wage_for(skill),
@@ -232,7 +244,11 @@ impl Staff {
 
     /// Fires a driver who is not currently driving.
     pub fn fire(&mut self, id: u32) -> Result<String, &'static str> {
-        let pos = self.drivers.iter().position(|d| d.id == id).ok_or("unknown driver")?;
+        let pos = self
+            .drivers
+            .iter()
+            .position(|d| d.id == id)
+            .ok_or("unknown driver")?;
         if self.drivers[pos].bus.is_some() {
             return Err("that driver is on the road right now");
         }
@@ -303,7 +319,11 @@ mod tests {
 
     #[test]
     fn timetable_departures() {
-        let t = Timetable { first: 6 * 60, last: 7 * 60, interval: 20 };
+        let t = Timetable {
+            first: 6 * 60,
+            last: 7 * 60,
+            interval: 20,
+        };
         let d = t.departures(0.0, 1440.0);
         assert_eq!(d, vec![360.0, 380.0, 400.0, 420.0]);
         assert_eq!(t.trips_per_day(), 4);

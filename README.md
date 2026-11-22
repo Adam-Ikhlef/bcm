@@ -1,23 +1,28 @@
+<h1 align="center">Bus Manager</h1>
+
 <p align="center">
-  <a href="https://github.com/YOZTeam/BusManager/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/YOZTeam/BusManager?label=version&color=f47f30&style=for-the-badge"></a>
-  <a href="https://busmanager.yoz-team.online/"><img alt="Playing now" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fbcm.adamikhlef.workers.dev%2Fbadge&label=playing%20now&style=for-the-badge&logo=steam&logoColor=white"></a>
-  <a href="https://github.com/YOZTeam/BusManager/actions/workflows/build.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/YOZTeam/BusManager/build.yml?branch=main&style=for-the-badge&label=build"></a>
-  <a href="https://busmanager.yoz-team.online/"><img alt="Docs" src="https://img.shields.io/badge/docs-website-2d3138?style=for-the-badge"></a>
-  <a href="https://discord.gg/Ppx7u4g2Wt"><img alt="Discord" src="https://img.shields.io/badge/discord-join%20us-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
-  <a href="https://ko-fi.com/adamikhlef"><img alt="Ko-fi" src="https://img.shields.io/badge/ko--fi-support-29abe0?style=for-the-badge&logo=kofi&logoColor=white"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/YOZTeam/BusManager?style=for-the-badge"></a>
+  A bus company management game on <b>real OpenStreetMap data</b>, built with Rust and Bevy.
 </p>
 
-> [!WARNING]
-> **Early development. Expect bugs.** Things may be missing, broken or change between
-> versions. Please report problems in [Issues](https://github.com/YOZTeam/BusManager/issues)
-> or on our [Discord server](https://discord.gg/Ppx7u4g2Wt).
+<p align="center">
+  <a href="https://github.com/YOZTeam/BusManager/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/YOZTeam/BusManager?include_prereleases&sort=semver&color=2e7d32"></a>
+  <a href="https://github.com/YOZTeam/BusManager/actions/workflows/build.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/YOZTeam/BusManager/build.yml?label=build"></a>
+  <a href="https://github.com/YOZTeam/BusManager/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/YOZTeam/BusManager/ci.yml?label=tests"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/YOZTeam/BusManager"></a>
+  <a href="https://github.com/YOZTeam/BusManager/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/YOZTeam/BusManager/total?color=2e7d32"></a>
+  <a href="https://discord.gg/Ppx7u4g2Wt"><img alt="Discord" src="https://img.shields.io/discord/1573640143842058240?logo=discord&logoColor=white&label=discord&color=5865F2"></a>
+  <a href="https://ko-fi.com/adamikhlef"><img alt="Ko-fi" src="https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=ko-fi&logoColor=white"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-555">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-2021-b7410e?logo=rust&logoColor=white">
+  <img alt="Bevy" src="https://img.shields.io/badge/Bevy-0.16-232326">
+  <a href="https://github.com/YOZTeam/BusManager/pulls"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen"></a>
+</p>
 
-# Bus Manager (prototype)
-
-A bus company management game built with Rust + Bevy, on **real OpenStreetMap data**, drawn in the
-OpenStreetMap standard look (green land, outlined roads, German **H** bus stop signs).
+Real cities from OpenStreetMap (downloaded in game), OSM-style map with German **H** bus stops,
+a 3D depot, timetables, drivers and shifts, real bus routes and player-made bus mods.
 Targets Windows, macOS and Ubuntu.
+
+> **Status:** early development. Expect missing features (saving and loading are not implemented yet).
 
 ## For players: the installer
 
@@ -37,10 +42,16 @@ cargo run --release -p busmanager-installer   # the installer
 The installer downloads from GitHub Releases. Set your repository when building it:
 
 ```bash
-BUSMANAGER_REPO=yourname/busmanager cargo build --release -p busmanager-installer
+BUSMANAGER_REPO=YOZTeam/BusManager cargo build --release -p busmanager-installer
 ```
 
 (The included GitHub Actions workflow does this automatically.)
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Issues must be in English.
+
+## Support
+
+Bus Manager is free. If you enjoy it you can support development on [Ko-fi](https://ko-fi.com/adamikhlef).
 
 ### Publishing a release
 

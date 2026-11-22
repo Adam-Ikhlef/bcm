@@ -1,87 +1,55 @@
-name: Bug Report
-description: Report a crash, simulation bug, map/route issue, or installer problem
-title: "[Bug]: "
-labels: ["bug", "needs-triage"]
+name: Bug report
+description: Something is broken or behaves wrongly
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve **Bus Company Manager**! Please fill out as much detail as you can so we can reproduce the issue.
-
-  - type: dropdown
-    id: component
-    attributes:
-      label: Affected Component
-      description: Where did the issue occur?
-      options:
-        - Game (`busmanager`)
-        - Installer (`busmanager-installer`)
-        - Map / Route / Pathfinding
-        - Simulation / Economy / Fleet
-        - UI / Rendering / Audio
-        - Save / Load / Config
-        - Other
-    validations:
-      required: true
-
-  - type: input
-    id: version
-    attributes:
-      label: Version or Commit
-      description: Release tag (e.g. `v0.2.0`) or commit SHA if built from source
-      placeholder: "e.g. v0.2.0 or 1a2b3c4"
-    validations:
-      required: true
-
-  - type: dropdown
-    id: os
-    attributes:
-      label: Operating System
-      options:
-        - Windows (10 / 11)
-        - Linux (X11)
-        - Linux (Wayland)
-        - macOS
-        - Other
-    validations:
-      required: true
-
+        **Issues must be written in English.** Issues in other languages are closed automatically.
   - type: textarea
-    id: description
+    id: what
     attributes:
       label: What happened?
-      description: Describe the bug clearly and what you expected to happen instead.
-      placeholder: "e.g. Creating a route between Stop A and Stop B caused a panic or infinite loop..."
+      description: What did you expect, and what did you see instead?
     validations:
       required: true
-
   - type: textarea
     id: steps
     attributes:
-      label: Steps to Reproduce
-      description: List the exact steps needed to trigger the issue.
-      placeholder: |
-        1. Open ...
-        2. Select ...
-        3. Click ...
+      label: Steps to reproduce
+      placeholder: "1. New game, city ...\n2. Create a line ...\n3. ..."
     validations:
       required: true
-
+  - type: input
+    id: version
+    attributes:
+      label: Game version
+      description: Shown on the main menu and in Options.
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: Graphics card and driver (if relevant)
   - type: textarea
     id: logs
     attributes:
-      label: Logs / Backtrace / Screenshots
-      description: Paste any console output, panic backtrace, or installer logs inside a code block.
-      render: shell
-      placeholder: |
-        Paste logs or backtrace here...
-
+      label: Crash log
+      description: Paste the contents of `crash.log` (next to the game) or the terminal output.
+      render: text
   - type: checkboxes
-    id: checklist
+    id: checks
     attributes:
-      label: Pre-submission Checks
+      label: Checklist
       options:
-        - label: I searched existing issues to make sure this hasn't already been reported.
+        - label: I searched existing issues first
           required: true
-        - label: I am running without custom/unsupported local edits or mods (or noted them above).
-          required: false
+        - label: I am using the latest release

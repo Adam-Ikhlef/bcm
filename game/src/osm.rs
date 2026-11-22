@@ -99,12 +99,13 @@ fn area_kind<'a>(get: impl Fn(&str) -> Option<&'a str>) -> Option<AreaKind> {
     {
         return Some(AreaKind::Water);
     }
-    if matches!(get("leisure"), Some("park" | "garden" | "playground" | "recreation_ground" | "nature_reserve"))
-        || matches!(
-            get("landuse"),
-            Some("grass" | "forest" | "meadow" | "recreation_ground" | "village_green" | "cemetery")
-        )
-        || matches!(get("natural"), Some("wood" | "scrub" | "grassland"))
+    if matches!(
+        get("leisure"),
+        Some("park" | "garden" | "playground" | "recreation_ground" | "nature_reserve")
+    ) || matches!(
+        get("landuse"),
+        Some("grass" | "forest" | "meadow" | "recreation_ground" | "village_green" | "cemetery")
+    ) || matches!(get("natural"), Some("wood" | "scrub" | "grassland"))
     {
         return Some(AreaKind::Park);
     }
@@ -174,14 +175,23 @@ impl MapData {
     /// Shortest road path between two nodes (inclusive), `None` when not connected.
     pub fn leg(&self, a: NodeIndex, b: NodeIndex) -> Option<Vec<Vec2>> {
         let goal = self.graph[b];
-        let (_, nodes) = astar(&self.graph, a, |n| n == b, |e| *e.weight(), |n| self.graph[n].distance(goal))?;
+        let (_, nodes) = astar(
+            &self.graph,
+            a,
+            |n| n == b,
+            |e| *e.weight(),
+            |n| self.graph[n].distance(goal),
+        )?;
         Some(nodes.into_iter().map(|n| self.graph[n]).collect())
     }
 
     /// Route a bus through the given stops (indices into `stops`) and back to the first one.
     /// Returns `None` if two stops are not connected by road.
     pub fn route_loop(&self, stops: &[usize]) -> Option<Route> {
-        let items: Vec<(NodeIndex, Option<usize>)> = stops.iter().map(|&s| (self.stops[s].node, Some(s))).collect();
+        let items: Vec<(NodeIndex, Option<usize>)> = stops
+            .iter()
+            .map(|&s| (self.stops[s].node, Some(s)))
+            .collect();
         self.route_through(&items)
     }
 
@@ -243,9 +253,13 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
             }
             OsmObj::Way(w) => {
                 let ids: Vec<i64> = w.nodes.iter().map(|n| n.0).collect();
-                if let Some(class) = w.tags.get("highway").and_then(|h| RoadClass::from_tag(h.as_str())) {
-                    let oneway =
-                        w.tags.contains("oneway", "yes") || w.tags.contains("junction", "roundabout");
+                if let Some(class) = w
+                    .tags
+                    .get("highway")
+                    .and_then(|h| RoadClass::from_tag(h.as_str()))
+                {
+                    let oneway = w.tags.contains("oneway", "yes")
+                        || w.tags.contains("junction", "roundabout");
                     ways.push((ids, oneway, class));
                 } else if let Some(kind) = area_kind(|k| w.tags.get(k).map(|v| v.as_str())) {
                     areas.push((ids, kind));
@@ -263,10 +277,18 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
                         _ => None,
                     })
                     .collect();
-                let has_platform = node_members.iter().any(|(_, role)| role.starts_with("platform"));
+                let has_platform = node_members
+                    .iter()
+                    .any(|(_, role)| role.starts_with("platform"));
                 let stops: Vec<i64> = node_members
                     .iter()
-                    .filter(|(_, role)| if has_platform { role.starts_with("platform") } else { role.starts_with("stop") })
+                    .filter(|(_, role)| {
+                        if has_platform {
+                            role.starts_with("platform")
+                        } else {
+                            role.starts_with("stop")
+                        }
+                    })
                     .map(|(id, _)| *id)
                     .collect();
                 let get = |k: &str| r.tags.get(k).map(|v| v.to_string());
@@ -278,7 +300,12 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
                     })
                     .unwrap_or_else(|| format!("Bus {ref_}"));
                 let interval_min = get("interval").and_then(|v| parse_interval(&v));
-                raw_routes.push(RawRoute { ref_, name, interval_min, stops });
+                raw_routes.push(RawRoute {
+                    ref_,
+                    name,
+                    interval_min,
+                    stops,
+                });
             }
         }
     }
@@ -346,7 +373,8 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
                     nodes.insert(el.id, (lat, lon));
                     if let Some(tags) = &el.tags {
                         let is_stop = tags.get("highway").map(String::as_str) == Some("bus_stop")
-                            || (tags.get("public_transport").map(String::as_str) == Some("platform")
+                            || (tags.get("public_transport").map(String::as_str)
+                                == Some("platform")
                                 && tags.get("bus").map(String::as_str) == Some("yes"));
                         if is_stop {
                             let name = tags
@@ -370,16 +398,25 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
                 }
             }
             "relation" => {
-                let (Some(tags), Some(members)) = (el.tags, el.members) else { continue };
+                let (Some(tags), Some(members)) = (el.tags, el.members) else {
+                    continue;
+                };
                 if tags.get("route").map(String::as_str) != Some("bus") {
                     continue;
                 }
-                let node_members: Vec<&Member> = members.iter().filter(|m| m.kind == "node").collect();
+                let node_members: Vec<&Member> =
+                    members.iter().filter(|m| m.kind == "node").collect();
                 // Prefer platforms (they are the bus stop nodes); else stop positions.
                 let has_platform = node_members.iter().any(|m| m.role.starts_with("platform"));
                 let stops: Vec<i64> = node_members
                     .iter()
-                    .filter(|m| if has_platform { m.role.starts_with("platform") } else { m.role.starts_with("stop") })
+                    .filter(|m| {
+                        if has_platform {
+                            m.role.starts_with("platform")
+                        } else {
+                            m.role.starts_with("stop")
+                        }
+                    })
                     .map(|m| m.id)
                     .collect();
                 let ref_ = tags.get("ref").cloned().unwrap_or_default();
@@ -392,7 +429,12 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
                     })
                     .unwrap_or_else(|| format!("Bus {ref_}"));
                 let interval_min = tags.get("interval").and_then(|v| parse_interval(v));
-                raw_routes.push(RawRoute { ref_, name, interval_min, stops });
+                raw_routes.push(RawRoute {
+                    ref_,
+                    name,
+                    interval_min,
+                    stops,
+                });
             }
             _ => {}
         }
@@ -431,7 +473,10 @@ fn build(
     let (lat0, lon0) = ((min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0);
     let kx = 111_320.0 * lat0.to_radians().cos();
     let project = |lat: f64, lon: f64| -> Vec2 {
-        Vec2::new(((lon - lon0) * kx) as f32, ((lat - lat0) * 110_540.0) as f32)
+        Vec2::new(
+            ((lon - lon0) * kx) as f32,
+            ((lat - lat0) * 110_540.0) as f32,
+        )
     };
 
     // Build the graph.
@@ -501,11 +546,16 @@ fn build(
         let mut buildings = 0u32;
         for dx in -1..=1 {
             for dy in -1..=1 {
-                buildings += building_cells.get(&(cx + dx, cy + dy)).copied().unwrap_or(0);
+                buildings += building_cells
+                    .get(&(cx + dx, cy + dy))
+                    .copied()
+                    .unwrap_or(0);
                 if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
                     density += cell.len();
                     for &(i, p) in cell {
-                        if best.map_or(true, |(_, bp)| p.distance_squared(pos) < bp.distance_squared(pos)) {
+                        if best.map_or(true, |(_, bp)| {
+                            p.distance_squared(pos) < bp.distance_squared(pos)
+                        }) {
                             best = Some((i, p));
                         }
                     }
@@ -521,7 +571,13 @@ fn build(
                     (buildings as f32 / 400.0).clamp(0.3, 3.0)
                 };
                 stop_by_osm.insert(osm_id, stops.len());
-                stops.push(Stop { osm_id, name, pos: npos, node, demand });
+                stops.push(Stop {
+                    osm_id,
+                    name,
+                    pos: npos,
+                    node,
+                    demand,
+                });
             }
         }
     }
@@ -538,12 +594,27 @@ fn build(
             }
         }
         if idx.len() >= 2 {
-            routes.push(BusRoute { ref_: r.ref_, name: r.name, stops: idx, interval_min: r.interval_min });
+            routes.push(BusRoute {
+                ref_: r.ref_,
+                name: r.name,
+                stops: idx,
+                interval_min: r.interval_min,
+            });
         }
     }
-    routes.sort_by(|a, b| natural_key(&a.ref_).cmp(&natural_key(&b.ref_)).then(a.name.cmp(&b.name)));
+    routes.sort_by(|a, b| {
+        natural_key(&a.ref_)
+            .cmp(&natural_key(&b.ref_))
+            .then(a.name.cmp(&b.name))
+    });
 
-    Ok(MapData { graph, roads, areas, stops, routes })
+    Ok(MapData {
+        graph,
+        roads,
+        areas,
+        stops,
+        routes,
+    })
 }
 
 #[cfg(test)]

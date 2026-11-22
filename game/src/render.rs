@@ -100,7 +100,11 @@ fn level_for(class: RoadClass, scale: f32) -> i32 {
 }
 
 fn widths(class: RoadClass, level: i32) -> (f32, f32) {
-    let scale_q = if level == BASE_LEVEL { 0.0 } else { LEVEL_STEP.powi(level) };
+    let scale_q = if level == BASE_LEVEL {
+        0.0
+    } else {
+        LEVEL_STEP.powi(level)
+    };
     let fill = base_width(class).max(min_px(class) * scale_q);
     let casing = fill + 2.0 * 1.0f32.max(0.9 * scale_q);
     (fill, casing)
@@ -133,7 +137,10 @@ fn build_ribbon(roads: &[Road], idxs: &[usize], width: f32) -> Mesh {
         }
     }
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_indices(Indices::U32(indices));
     mesh
@@ -205,7 +212,11 @@ pub fn update_roads(
 
     for layer in layers.0.iter_mut() {
         let visible = scale < hide_above(layer.class);
-        let want = if visible { Visibility::Visible } else { Visibility::Hidden };
+        let want = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
         for e in [layer.fill_entity, layer.casing_entity] {
             if let Ok(mut v) = visibilities.get_mut(e) {
                 if *v != want {
@@ -221,8 +232,14 @@ pub fn update_roads(
             continue;
         }
         let (fill_w, casing_w) = widths(layer.class, level);
-        meshes.insert(layer.fill.id(), build_ribbon(&map.roads, &layer.roads, fill_w));
-        meshes.insert(layer.casing.id(), build_ribbon(&map.roads, &layer.roads, casing_w));
+        meshes.insert(
+            layer.fill.id(),
+            build_ribbon(&map.roads, &layer.roads, fill_w),
+        );
+        meshes.insert(
+            layer.casing.id(),
+            build_ribbon(&map.roads, &layer.roads, casing_w),
+        );
         layer.built_level = Some(level);
         rebuilt = true;
     }
@@ -254,7 +271,11 @@ fn build_area_mesh(map: &MapData, kind: AreaKind) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     for area in map.areas.iter().filter(|a| a.kind == kind) {
-        let flat: Vec<f64> = area.pts.iter().flat_map(|p| [p.x as f64, p.y as f64]).collect();
+        let flat: Vec<f64> = area
+            .pts
+            .iter()
+            .flat_map(|p| [p.x as f64, p.y as f64])
+            .collect();
         let Ok(tris) = earcutr::earcut(&flat, &[], 2) else {
             continue;
         };
@@ -262,7 +283,10 @@ fn build_area_mesh(map: &MapData, kind: AreaKind) -> Mesh {
         positions.extend(area.pts.iter().map(|p| [p.x, p.y, 0.0]));
         indices.extend(tris.into_iter().map(|i| base + i as u32));
     }
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_indices(Indices::U32(indices));
     mesh
@@ -295,7 +319,11 @@ pub fn update_buildings(
     cam: Single<&Projection, With<MapCamera>>,
     mut q: Query<&mut Visibility, With<BuildingLayer>>,
 ) {
-    let want = if crate::ortho_scale(*cam) < 30.0 { Visibility::Visible } else { Visibility::Hidden };
+    let want = if crate::ortho_scale(*cam) < 30.0 {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
     for mut v in &mut q {
         if *v != want {
             *v = want;
@@ -316,7 +344,11 @@ fn smooth(edge_dist: f32, px: f32) -> f32 {
 }
 
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
 }
 
 fn box_sdf(x: f32, y: f32, cx: f32, cy: f32, hx: f32, hy: f32) -> f32 {
@@ -361,7 +393,11 @@ fn make_stop_icon() -> Image {
         }
     }
     Image::new(
-        Extent3d { width: N, height: N, depth_or_array_layers: 1 },
+        Extent3d {
+            width: N,
+            height: N,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         data,
         TextureFormat::Rgba8UnormSrgb,
@@ -379,7 +415,11 @@ fn make_badge_icon() -> Image {
             let x = (i as f32 + 0.5) / N as f32 * 2.0 - 1.0;
             let y = (j as f32 + 0.5) / N as f32 * 2.0 - 1.0;
             let r = x.hypot(y);
-            let c = mix([0.85, 0.12, 0.12], [1.0, 1.0, 1.0], 1.0 - smooth(r - 0.72, px));
+            let c = mix(
+                [0.85, 0.12, 0.12],
+                [1.0, 1.0, 1.0],
+                1.0 - smooth(r - 0.72, px),
+            );
             let alpha = smooth(r - 1.0, px);
             data.extend_from_slice(&[
                 (c[0] * 255.0) as u8,
@@ -390,7 +430,11 @@ fn make_badge_icon() -> Image {
         }
     }
     Image::new(
-        Extent3d { width: N, height: N, depth_or_array_layers: 1 },
+        Extent3d {
+            width: N,
+            height: N,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         data,
         TextureFormat::Rgba8UnormSrgb,
@@ -400,7 +444,10 @@ fn make_badge_icon() -> Image {
 
 pub fn install_icons(world: &mut World) {
     let mut images = world.resource_mut::<Assets<Image>>();
-    let icons = Icons { stop: images.add(make_stop_icon()), badge: images.add(make_badge_icon()) };
+    let icons = Icons {
+        stop: images.add(make_stop_icon()),
+        badge: images.add(make_badge_icon()),
+    };
     world.insert_resource(icons);
 }
 
@@ -455,7 +502,11 @@ pub fn update_stop_icons(
         let waiting = queues.waiting.get(marker.0).copied().unwrap_or(0.0);
         for child in children.iter() {
             if let Ok((mut sprite, mut vis)) = badges.get_mut(child) {
-                let want = if waiting >= 5.0 { Visibility::Inherited } else { Visibility::Hidden };
+                let want = if waiting >= 5.0 {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
                 if *vis != want {
                     *vis = want;
                 }
@@ -469,7 +520,10 @@ pub fn update_stop_icons(
 }
 
 /// Buses stay visible when zoomed out.
-pub fn update_bus_scale(cam: Single<&Projection, With<MapCamera>>, mut buses: Query<&mut Transform, With<Bus>>) {
+pub fn update_bus_scale(
+    cam: Single<&Projection, With<MapCamera>>,
+    mut buses: Query<&mut Transform, With<Bus>>,
+) {
     let scale = crate::ortho_scale(*cam);
     let f = (scale * 0.8).max(1.0); // roughly 21 x 8 screen pixels when zoomed out
     for mut tf in &mut buses {
@@ -487,13 +541,17 @@ pub fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     config.line.joints = GizmoLineJoint::Round(4);
 }
 
-pub fn draw_routes(
-    mut gizmos: Gizmos,
-    lines: Res<Lines>,
-) {
+pub fn draw_routes(mut gizmos: Gizmos, lines: Res<Lines>) {
     for l in &lines.0 {
         let mut c = l.color.to_srgba();
         c.alpha = 0.85;
-        gizmos.linestrip_2d(l.route.path.iter().copied().chain(l.route.path.first().copied()), c);
+        gizmos.linestrip_2d(
+            l.route
+                .path
+                .iter()
+                .copied()
+                .chain(l.route.path.first().copied()),
+            c,
+        );
     }
 }

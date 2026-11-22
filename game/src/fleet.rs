@@ -30,7 +30,12 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 4] = [Category::Minibus, Category::Solo, Category::Doubledecker, Category::Articulated];
+    pub const ALL: [Category; 4] = [
+        Category::Minibus,
+        Category::Solo,
+        Category::Doubledecker,
+        Category::Articulated,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -60,7 +65,11 @@ pub enum Model {
     /// Drawn by the game itself (see busmodel.rs).
     Builtin(Look),
     /// A glTF/GLB file from a mod folder. `asset` is e.g. `mods://buses/my-bus/model.glb`.
-    Gltf { asset: String, rot_y: f32, scale: f32 },
+    Gltf {
+        asset: String,
+        rot_y: f32,
+        scale: f32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -102,21 +111,23 @@ pub fn builtin_specs() -> Vec<BusSpec> {
         ("Mini Shuttle Plus",  Category::Minibus,      Look::Mini,        7.2, 2.8, 25.0, 1_450.0, 1.8, 0.38, 0.0021, (0x6a, 0xb0, 0x40)),
     ];
     rows.into_iter()
-        .map(|(name, category, look, length, height, capacity, price, fuel, wear, run, c)| BusSpec {
-            name: name.into(),
-            category,
-            length,
-            width: if look == Look::Mini { 2.3 } else { 2.55 },
-            height,
-            capacity,
-            price,
-            fuel_per_km: fuel,
-            wear_per_km: wear,
-            run_cost: run,
-            color: style::rgb(c.0, c.1, c.2),
-            model: Model::Builtin(look),
-            is_mod: false,
-        })
+        .map(
+            |(name, category, look, length, height, capacity, price, fuel, wear, run, c)| BusSpec {
+                name: name.into(),
+                category,
+                length,
+                width: if look == Look::Mini { 2.3 } else { 2.55 },
+                height,
+                capacity,
+                price,
+                fuel_per_km: fuel,
+                wear_per_km: wear,
+                run_cost: run,
+                color: style::rgb(c.0, c.1, c.2),
+                model: Model::Builtin(look),
+                is_mod: false,
+            },
+        )
         .collect()
 }
 
@@ -130,7 +141,10 @@ pub struct ModDirs {
 }
 
 pub fn mod_dirs() -> ModDirs {
-    let user = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("BusManager").join("mods");
+    let user = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("BusManager")
+        .join("mods");
     let _ = fs::create_dir_all(user.join("buses"));
     let local = std::env::current_exe()
         .ok()
@@ -170,15 +184,33 @@ struct ModJson {
     category: Option<Category>,
 }
 
-fn d_length() -> f32 { 12.0 }
-fn d_width() -> f32 { 2.55 }
-fn d_height() -> f32 { 3.1 }
-fn d_capacity() -> f32 { 80.0 }
-fn d_price() -> f64 { 4_000.0 }
-fn d_fuel() -> f32 { 3.0 }
-fn d_wear() -> f32 { 0.5 }
-fn d_run() -> f64 { 0.004 }
-fn d_scale() -> f32 { 1.0 }
+fn d_length() -> f32 {
+    12.0
+}
+fn d_width() -> f32 {
+    2.55
+}
+fn d_height() -> f32 {
+    3.1
+}
+fn d_capacity() -> f32 {
+    80.0
+}
+fn d_price() -> f64 {
+    4_000.0
+}
+fn d_fuel() -> f32 {
+    3.0
+}
+fn d_wear() -> f32 {
+    0.5
+}
+fn d_run() -> f64 {
+    0.004
+}
+fn d_scale() -> f32 {
+    1.0
+}
 
 fn parse_hex(s: &str) -> Option<Color> {
     let s = s.trim().trim_start_matches('#');
@@ -216,12 +248,17 @@ pub fn scan_mods(dirs: &ModDirs) -> Vec<BusSpec> {
                 }
             };
             if !entry.path().join(&m.model).is_file() {
-                eprintln!("Bus mod '{folder}' skipped: model file '{}' not found", m.model);
+                eprintln!(
+                    "Bus mod '{folder}' skipped: model file '{}' not found",
+                    m.model
+                );
                 continue;
             }
             out.push(BusSpec {
                 name: m.name,
-                category: m.category.unwrap_or_else(|| Category::guess(m.length, m.height)),
+                category: m
+                    .category
+                    .unwrap_or_else(|| Category::guess(m.length, m.height)),
                 length: m.length,
                 width: m.width,
                 height: m.height,
@@ -230,7 +267,11 @@ pub fn scan_mods(dirs: &ModDirs) -> Vec<BusSpec> {
                 fuel_per_km: m.fuel_per_km,
                 wear_per_km: m.wear_per_km,
                 run_cost: m.run_cost,
-                color: m.color.as_deref().and_then(parse_hex).unwrap_or(style::rgb(0x6b, 0x7a, 0x8f)),
+                color: m
+                    .color
+                    .as_deref()
+                    .and_then(parse_hex)
+                    .unwrap_or(style::rgb(0x6b, 0x7a, 0x8f)),
                 model: Model::Gltf {
                     asset: format!("{source}://buses/{folder}/{}", m.model),
                     rot_y: m.rotation_y,
@@ -278,7 +319,8 @@ impl FleetBus {
     }
 
     pub fn service_cost(&self) -> f64 {
-        ((100.0 - self.fuel) * 0.5 + (100.0 - self.condition) * 2.0 + (100.0 - self.clean) * 0.3) as f64
+        ((100.0 - self.fuel) * 0.5 + (100.0 - self.condition) * 2.0 + (100.0 - self.clean) * 0.3)
+            as f64
     }
 }
 
@@ -337,7 +379,9 @@ impl Fleet {
     pub fn unassigned_operational(&self) -> Option<u32> {
         self.buses
             .iter()
-            .find(|b| b.line.is_none() && b.assigned.is_none() && b.depart.is_none() && !b.needs_service())
+            .find(|b| {
+                b.line.is_none() && b.assigned.is_none() && b.depart.is_none() && !b.needs_service()
+            })
             .map(|b| b.id)
     }
 
@@ -345,16 +389,28 @@ impl Fleet {
     pub fn ready_for(&self, line: usize) -> Option<u32> {
         self.buses
             .iter()
-            .find(|b| b.assigned == Some(line) && b.line.is_none() && b.depart.is_none() && b.bay.is_some() && !b.needs_service())
+            .find(|b| {
+                b.assigned == Some(line)
+                    && b.line.is_none()
+                    && b.depart.is_none()
+                    && b.bay.is_some()
+                    && !b.needs_service()
+            })
             .map(|b| b.id)
     }
 
     pub fn assigned_count(&self, line: usize) -> usize {
-        self.buses.iter().filter(|b| b.assigned == Some(line)).count()
+        self.buses
+            .iter()
+            .filter(|b| b.assigned == Some(line))
+            .count()
     }
 
     pub fn running_count(&self, line: usize) -> usize {
-        self.buses.iter().filter(|b| b.line == Some(line) || b.depart.is_some_and(|d| d.line == line)).count()
+        self.buses
+            .iter()
+            .filter(|b| b.line == Some(line) || b.depart.is_some_and(|d| d.line == line))
+            .count()
     }
 
     /// Bring a bus back to the depot.

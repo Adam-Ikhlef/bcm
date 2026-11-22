@@ -47,11 +47,24 @@ pub fn spawn_staff_ui(mut commands: Commands) {
         GameUi,
         StaffPanel,
         Interaction::default(),
-        panel_node(76.0, Val::Px(40.0), Val::Px(40.0), Val::Auto, Val::Px(40.0)),
+        panel_node(
+            76.0,
+            Val::Px(crate::ui::SIDEBAR_W + 24.0),
+            Val::Px(24.0),
+            Val::Auto,
+            Val::Px(24.0),
+        ),
         BackgroundColor(style::PANEL),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(16.0)),
-        children![(StaffBody, Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(12.0), ..default() })],
+        children![(
+            StaffBody,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(12.0),
+                ..default()
+            }
+        )],
     ));
     // Timetable panel on the left of the map.
     commands.spawn((
@@ -59,11 +72,24 @@ pub fn spawn_staff_ui(mut commands: Commands) {
         MapUi,
         TimetablePanel,
         Interaction::default(),
-        panel_node(76.0, Val::Px(14.0), Val::Auto, Val::Px(340.0), Val::Auto),
+        panel_node(
+            76.0,
+            Val::Px(crate::ui::SIDEBAR_W + 14.0),
+            Val::Auto,
+            Val::Px(340.0),
+            Val::Auto,
+        ),
         BackgroundColor(style::PANEL),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(14.0)),
-        children![(TimetableBody, Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(9.0), ..default() })],
+        children![(
+            TimetableBody,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(9.0),
+                ..default()
+            }
+        )],
     ));
 }
 
@@ -96,11 +122,17 @@ pub fn staff_actions(
             }
             Action::CloseTimetable | Action::NewLine | Action::Menu => tt.0 = None,
             Action::TtFirst(d) | Action::TtLast(d) | Action::TtInterval(d) => {
-                let Some(line) = tt.0.and_then(|i| lines.0.get_mut(i)) else { continue };
+                let Some(line) = tt.0.and_then(|i| lines.0.get_mut(i)) else {
+                    continue;
+                };
                 let t = &mut line.timetable;
                 match *a {
-                    Action::TtFirst(_) => t.first = (t.first as i32 + d).clamp(0, t.last as i32) as u32,
-                    Action::TtLast(_) => t.last = (t.last as i32 + d).clamp(t.first as i32, 1439) as u32,
+                    Action::TtFirst(_) => {
+                        t.first = (t.first as i32 + d).clamp(0, t.last as i32) as u32
+                    }
+                    Action::TtLast(_) => {
+                        t.last = (t.last as i32 + d).clamp(t.first as i32, 1439) as u32
+                    }
                     _ => t.interval = (t.interval as i32 + d).clamp(5, 60) as u32,
                 }
             }
@@ -115,7 +147,14 @@ fn stars(skill: u8) -> String {
     format!("Skill {skill}/5")
 }
 
-fn driver_row(f: &UiFonts, d: &Driver, status: String, status_color: Color, action: Action, label: &str) -> impl Bundle {
+fn driver_row(
+    f: &UiFonts,
+    d: &Driver,
+    status: String,
+    status_color: Color,
+    action: Action,
+    label: &str,
+) -> impl Bundle {
     (
         Node {
             align_items: AlignItems::Center,
@@ -129,10 +168,25 @@ fn driver_row(f: &UiFonts, d: &Driver, status: String, status_color: Color, acti
         BorderRadius::all(Val::Px(10.0)),
         children![
             (
-                Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() },
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    ..default()
+                },
                 children![
                     text(f, true, 14.0, style::TEXT, d.name.clone()),
-                    text(f, false, 12.0, style::MUTED, format!("{} · {} · {}/day", stars(d.skill), d.shift.label(), fmt_money(d.wage))),
+                    text(
+                        f,
+                        false,
+                        12.0,
+                        style::MUTED,
+                        format!(
+                            "{} · {} · {}/day",
+                            stars(d.skill),
+                            d.shift.label(),
+                            fmt_money(d.wage)
+                        )
+                    ),
                     text(f, false, 12.0, status_color, status),
                 ]
             ),
@@ -153,7 +207,11 @@ pub fn rebuild_staff(
     mut panel: Single<&mut Node, (With<StaffPanel>, Without<StaffBody>)>,
     mut last: Local<Option<(u32, u32, u32, bool, u32)>>,
 ) {
-    let want = if *view == View::Staff { Display::Flex } else { Display::None };
+    let want = if *view == View::Staff {
+        Display::Flex
+    } else {
+        Display::None
+    };
     if panel.display != want {
         panel.display = want;
     }
@@ -161,7 +219,13 @@ pub fn rebuild_staff(
         *last = None;
         return;
     }
-    let key = (staff.version, fleet.version, trips.version, true, clock.minute_of_day() / 10);
+    let key = (
+        staff.version,
+        fleet.version,
+        trips.version,
+        true,
+        clock.minute_of_day() / 10,
+    );
     if *last == Some(key) {
         return;
     }
@@ -241,7 +305,12 @@ pub fn rebuild_staff(
 
 /// Estimated game minutes for one loop of the line.
 pub fn loop_minutes(line: &crate::BusLine) -> f64 {
-    let len: f32 = line.route.path.windows(2).map(|w| w[0].distance(w[1])).sum();
+    let len: f32 = line
+        .route
+        .path
+        .windows(2)
+        .map(|w| w[0].distance(w[1]))
+        .sum();
     let stops = line.route.stop_at.iter().filter(|s| s.is_some()).count() as f32;
     let secs = len / BUS_SPEED + stops * 3.0;
     (secs * TIME_SCALE / 60.0) as f64
@@ -249,14 +318,29 @@ pub fn loop_minutes(line: &crate::BusLine) -> f64 {
 
 fn stepper(f: &UiFonts, label: &str, value: String, minus: Action, plus: Action) -> impl Bundle {
     (
-        Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() },
+        Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        },
         children![
             text(f, false, 13.0, style::MUTED, label.to_string()),
             (
-                Node { align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() },
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
                 children![
                     button(f, "–", minus, BtnKind::Small),
-                    (Node { min_width: Val::Px(64.0), justify_content: JustifyContent::Center, ..default() }, children![text(f, true, 15.0, style::TEXT, value)]),
+                    (
+                        Node {
+                            min_width: Val::Px(64.0),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        children![text(f, true, 15.0, style::TEXT, value)]
+                    ),
                     button(f, "+", plus, BtnKind::Small),
                 ]
             ),
@@ -293,7 +377,14 @@ pub fn rebuild_timetable(
     };
     let line = &lines.0[i];
     let tt = line.timetable;
-    let key = (i, fleet.version, trips.version, staff.version, clock.minute_of_day(), tt.first ^ (tt.last << 11) ^ (tt.interval << 22));
+    let key = (
+        i,
+        fleet.version,
+        trips.version,
+        staff.version,
+        clock.minute_of_day(),
+        tt.first ^ (tt.last << 11) ^ (tt.interval << 22),
+    );
     if *last == Some(key) {
         return;
     }
@@ -309,10 +400,17 @@ pub fn rebuild_timetable(
     commands.entity(*body).despawn_related::<Children>();
     commands.entity(*body).with_children(|p| {
         p.spawn((
-            Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() },
+            Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            },
             children![
                 (
-                    Node { flex_direction: FlexDirection::Column, ..default() },
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
                     children![
                         text(f, true, 18.0, style::TEXT, line.name.clone()),
                         text(f, false, 12.0, style::MUTED, "Timetable"),
@@ -321,9 +419,27 @@ pub fn rebuild_timetable(
                 button(f, "Close", Action::CloseTimetable, BtnKind::Small),
             ],
         ));
-        p.spawn(stepper(f, "First departure", hhmm(tt.first), Action::TtFirst(-30), Action::TtFirst(30)));
-        p.spawn(stepper(f, "Last departure", hhmm(tt.last), Action::TtLast(-30), Action::TtLast(30)));
-        p.spawn(stepper(f, "Every", format!("{} min", tt.interval), Action::TtInterval(-5), Action::TtInterval(5)));
+        p.spawn(stepper(
+            f,
+            "First departure",
+            hhmm(tt.first),
+            Action::TtFirst(-30),
+            Action::TtFirst(30),
+        ));
+        p.spawn(stepper(
+            f,
+            "Last departure",
+            hhmm(tt.last),
+            Action::TtLast(-30),
+            Action::TtLast(30),
+        ));
+        p.spawn(stepper(
+            f,
+            "Every",
+            format!("{} min", tt.interval),
+            Action::TtInterval(-5),
+            Action::TtInterval(5),
+        ));
         p.spawn(stepper(
             f,
             "Buses on this line",
@@ -349,13 +465,24 @@ pub fn rebuild_timetable(
         // Shift coverage for the service hours
         let mut missing: Vec<&str> = Vec::new();
         for s in Shift::ALL {
-            let covers = (tt.first..=tt.last).step_by(30).any(|m| s.contains(m % 1440));
+            let covers = (tt.first..=tt.last)
+                .step_by(30)
+                .any(|m| s.contains(m % 1440));
             if covers && !staff.drivers.iter().any(|d| d.shift == s) {
                 missing.push(s.short());
             }
         }
         if !missing.is_empty() {
-            p.spawn(text(f, false, 12.0, style::DANGER, format!("No drivers for the {} shift: trips in those hours will be missed.", missing.join(" / "))));
+            p.spawn(text(
+                f,
+                false,
+                12.0,
+                style::DANGER,
+                format!(
+                    "No drivers for the {} shift: trips in those hours will be missed.",
+                    missing.join(" / ")
+                ),
+            ));
         }
 
         p.spawn(text(f, true, 12.0, style::MUTED, "DEPARTURES"));
@@ -363,21 +490,38 @@ pub fn rebuild_timetable(
         for d in deps.iter().take(8) {
             let minute = (*d % MIN_PER_DAY) as u32;
             let (txt, color) = match trips.done.get(&(i, *d as u64)) {
-                Some(Outcome::Assigned { plate, driver }) => (format!("{plate} · {driver}"), style::TEXT),
+                Some(Outcome::Assigned { plate, driver }) => {
+                    (format!("{plate} · {driver}"), style::TEXT)
+                }
                 Some(Outcome::Missed(why)) => (format!("MISSED · {why}"), style::DANGER),
                 None if *d < now => ("—".to_string(), style::MUTED),
                 None => ("planned".to_string(), style::MUTED),
             };
             p.spawn((
-                Node { column_gap: Val::Px(12.0), ..default() },
+                Node {
+                    column_gap: Val::Px(12.0),
+                    ..default()
+                },
                 children![
-                    (Node { width: Val::Px(50.0), ..default() }, children![text(f, true, 13.0, style::TEXT, hhmm(minute))]),
+                    (
+                        Node {
+                            width: Val::Px(50.0),
+                            ..default()
+                        },
+                        children![text(f, true, 13.0, style::TEXT, hhmm(minute))]
+                    ),
                     text(f, false, 13.0, color, txt),
                 ],
             ));
         }
         if deps.is_empty() {
-            p.spawn(text(f, false, 12.0, style::MUTED, "No departures in the next 8 hours."));
+            p.spawn(text(
+                f,
+                false,
+                12.0,
+                style::MUTED,
+                "No departures in the next 8 hours.",
+            ));
         }
     });
 }

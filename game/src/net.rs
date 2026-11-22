@@ -50,7 +50,8 @@ pub fn search_places(query: &str) -> Result<Vec<Place>, String> {
         .query("accept-language", "en")
         .call()
         .map_err(|e| e.to_string())?;
-    let places: Vec<Place> = serde_json::from_reader(resp.into_reader()).map_err(|e| e.to_string())?;
+    let places: Vec<Place> =
+        serde_json::from_reader(resp.into_reader()).map_err(|e| e.to_string())?;
     Ok(places
         .into_iter()
         .filter(|p| p.osm_type == "relation")

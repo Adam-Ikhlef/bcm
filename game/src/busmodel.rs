@@ -26,13 +26,22 @@ pub struct BusAssets {
 }
 
 fn mat(color: Color, rough: f32) -> StandardMaterial {
-    StandardMaterial { base_color: color, perceptual_roughness: rough, metallic: 0.0, ..default() }
+    StandardMaterial {
+        base_color: color,
+        perceptual_roughness: rough,
+        metallic: 0.0,
+        ..default()
+    }
 }
 
 /// Creates shared meshes and materials. Called while building the app.
 pub fn install_bus_assets(world: &mut World) {
-    let cube = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(1.0, 1.0, 1.0));
-    let wheel = world.resource_mut::<Assets<Mesh>>().add(Cylinder::new(0.5, 1.0));
+    let cube = world
+        .resource_mut::<Assets<Mesh>>()
+        .add(Cuboid::new(1.0, 1.0, 1.0));
+    let wheel = world
+        .resource_mut::<Assets<Mesh>>()
+        .add(Cylinder::new(0.5, 1.0));
     let mut m = world.resource_mut::<Assets<StandardMaterial>>();
     let glow = |c: Color, l: LinearRgba| StandardMaterial {
         base_color: c,
@@ -54,9 +63,18 @@ pub fn install_bus_assets(world: &mut World) {
         dark: m.add(mat(Color::srgb(0.16, 0.17, 0.19), 0.7)),
         white: m.add(mat(Color::srgb(0.93, 0.94, 0.95), 0.6)),
         door: m.add(mat(Color::srgb(0.12, 0.16, 0.2), 0.3)),
-        amber: m.add(glow(Color::srgb(1.0, 0.65, 0.1), LinearRgba::rgb(3.0, 1.6, 0.0))),
-        headlight: m.add(glow(Color::srgb(1.0, 0.97, 0.8), LinearRgba::rgb(2.5, 2.4, 1.8))),
-        taillight: m.add(glow(Color::srgb(0.9, 0.1, 0.1), LinearRgba::rgb(2.0, 0.0, 0.0))),
+        amber: m.add(glow(
+            Color::srgb(1.0, 0.65, 0.1),
+            LinearRgba::rgb(3.0, 1.6, 0.0),
+        )),
+        headlight: m.add(glow(
+            Color::srgb(1.0, 0.97, 0.8),
+            LinearRgba::rgb(2.5, 2.4, 1.8),
+        )),
+        taillight: m.add(glow(
+            Color::srgb(0.9, 0.1, 0.1),
+            LinearRgba::rgb(2.0, 0.0, 0.0),
+        )),
     };
     world.insert_resource(assets);
 }
@@ -82,47 +100,136 @@ struct Segment {
     rear: bool,
 }
 
-fn segment(p: &mut ChildSpawnerCommands, a: &BusAssets, body: &Handle<StandardMaterial>, s: &Segment, w: f32, h: f32) {
+fn segment(
+    p: &mut ChildSpawnerCommands,
+    a: &BusAssets,
+    body: &Handle<StandardMaterial>,
+    s: &Segment,
+    w: f32,
+    h: f32,
+) {
     let band_lo = 1.15;
     let band_hi = h - 0.35;
     let band_h = band_hi - band_lo;
     let band_c = (band_lo + band_hi) / 2.0;
 
     // Lower body, windows, roof
-    part(p, &a.cube, body, Vec3::new(0.0, 0.75, s.z), Vec3::new(w, 0.8, s.len));
-    part(p, &a.cube, &a.glass, Vec3::new(0.0, band_c, s.z), Vec3::new(w + 0.02, band_h, s.len - 0.1));
-    part(p, &a.cube, &a.white, Vec3::new(0.0, h - 0.175, s.z), Vec3::new(w - 0.04, 0.35, s.len));
+    part(
+        p,
+        &a.cube,
+        body,
+        Vec3::new(0.0, 0.75, s.z),
+        Vec3::new(w, 0.8, s.len),
+    );
+    part(
+        p,
+        &a.cube,
+        &a.glass,
+        Vec3::new(0.0, band_c, s.z),
+        Vec3::new(w + 0.02, band_h, s.len - 0.1),
+    );
+    part(
+        p,
+        &a.cube,
+        &a.white,
+        Vec3::new(0.0, h - 0.175, s.z),
+        Vec3::new(w - 0.04, 0.35, s.len),
+    );
     // Roof units
-    part(p, &a.cube, &a.dark, Vec3::new(0.0, h + 0.12, s.z - s.len * 0.18), Vec3::new(w * 0.55, 0.26, s.len * 0.3));
+    part(
+        p,
+        &a.cube,
+        &a.dark,
+        Vec3::new(0.0, h + 0.12, s.z - s.len * 0.18),
+        Vec3::new(w * 0.55, 0.26, s.len * 0.3),
+    );
 
     // Window pillars
     let mut z = s.z - s.len / 2.0 + 0.9;
     while z < s.z + s.len / 2.0 - 0.5 {
-        part(p, &a.cube, body, Vec3::new(0.0, band_c, z), Vec3::new(w + 0.05, band_h, 0.12));
+        part(
+            p,
+            &a.cube,
+            body,
+            Vec3::new(0.0, band_c, z),
+            Vec3::new(w + 0.05, band_h, 0.12),
+        );
         z += 1.55;
     }
 
     // Doors on the right side
-    let doors: &[f32] = if s.len > 9.0 { &[s.len * 0.5 - 1.5, -s.len * 0.12] } else { &[s.len * 0.5 - 1.3] };
+    let doors: &[f32] = if s.len > 9.0 {
+        &[s.len * 0.5 - 1.5, -s.len * 0.12]
+    } else {
+        &[s.len * 0.5 - 1.3]
+    };
     for dz in doors {
-        part(p, &a.cube, &a.door, Vec3::new(w / 2.0 + 0.03, 1.2 + (h - 1.55).min(1.9) / 2.0, s.z + dz), Vec3::new(0.06, (h - 1.55).min(1.9), 1.15));
+        part(
+            p,
+            &a.cube,
+            &a.door,
+            Vec3::new(w / 2.0 + 0.03, 1.2 + (h - 1.55).min(1.9) / 2.0, s.z + dz),
+            Vec3::new(0.06, (h - 1.55).min(1.9), 1.15),
+        );
     }
 
     if s.front {
         let zf = s.z + s.len / 2.0;
-        part(p, &a.cube, &a.glass, Vec3::new(0.0, band_c, zf + 0.02), Vec3::new(w - 0.14, band_h, 0.05));
-        part(p, &a.cube, &a.dark, Vec3::new(0.0, 0.42, zf + 0.06), Vec3::new(w + 0.04, 0.34, 0.14));
-        part(p, &a.cube, &a.amber, Vec3::new(0.0, h - 0.62, zf + 0.04), Vec3::new(w * 0.6, 0.2, 0.05));
+        part(
+            p,
+            &a.cube,
+            &a.glass,
+            Vec3::new(0.0, band_c, zf + 0.02),
+            Vec3::new(w - 0.14, band_h, 0.05),
+        );
+        part(
+            p,
+            &a.cube,
+            &a.dark,
+            Vec3::new(0.0, 0.42, zf + 0.06),
+            Vec3::new(w + 0.04, 0.34, 0.14),
+        );
+        part(
+            p,
+            &a.cube,
+            &a.amber,
+            Vec3::new(0.0, h - 0.62, zf + 0.04),
+            Vec3::new(w * 0.6, 0.2, 0.05),
+        );
         for x in [-1.0, 1.0] {
-            part(p, &a.cube, &a.headlight, Vec3::new(x * (w / 2.0 - 0.32), 0.78, zf + 0.03), Vec3::new(0.32, 0.18, 0.06));
+            part(
+                p,
+                &a.cube,
+                &a.headlight,
+                Vec3::new(x * (w / 2.0 - 0.32), 0.78, zf + 0.03),
+                Vec3::new(0.32, 0.18, 0.06),
+            );
         }
     }
     if s.rear {
         let zr = s.z - s.len / 2.0;
-        part(p, &a.cube, &a.glass, Vec3::new(0.0, band_c, zr - 0.02), Vec3::new(w - 0.3, band_h * 0.7, 0.05));
-        part(p, &a.cube, &a.dark, Vec3::new(0.0, 0.42, zr - 0.06), Vec3::new(w + 0.04, 0.34, 0.14));
+        part(
+            p,
+            &a.cube,
+            &a.glass,
+            Vec3::new(0.0, band_c, zr - 0.02),
+            Vec3::new(w - 0.3, band_h * 0.7, 0.05),
+        );
+        part(
+            p,
+            &a.cube,
+            &a.dark,
+            Vec3::new(0.0, 0.42, zr - 0.06),
+            Vec3::new(w + 0.04, 0.34, 0.14),
+        );
         for x in [-1.0, 1.0] {
-            part(p, &a.cube, &a.taillight, Vec3::new(x * (w / 2.0 - 0.25), 0.85, zr - 0.03), Vec3::new(0.22, 0.34, 0.06));
+            part(
+                p,
+                &a.cube,
+                &a.taillight,
+                Vec3::new(x * (w / 2.0 - 0.25), 0.85, zr - 0.03),
+                Vec3::new(0.22, 0.34, 0.06),
+            );
         }
     }
 }
@@ -132,28 +239,72 @@ fn wheel(p: &mut ChildSpawnerCommands, a: &BusAssets, x: f32, z: f32) {
     p.spawn((
         Mesh3d(a.wheel.clone()),
         MeshMaterial3d(a.tire.clone()),
-        Transform { translation: Vec3::new(x, 0.5, z), rotation: rot, scale: Vec3::new(1.0, 0.34, 1.0) },
+        Transform {
+            translation: Vec3::new(x, 0.5, z),
+            rotation: rot,
+            scale: Vec3::new(1.0, 0.34, 1.0),
+        },
     ));
     let hub_x = x + x.signum() * 0.03;
     p.spawn((
         Mesh3d(a.wheel.clone()),
         MeshMaterial3d(a.hub.clone()),
-        Transform { translation: Vec3::new(hub_x, 0.5, z), rotation: rot, scale: Vec3::new(0.5, 0.34, 0.5) },
+        Transform {
+            translation: Vec3::new(hub_x, 0.5, z),
+            rotation: rot,
+            scale: Vec3::new(0.5, 0.34, 0.5),
+        },
     ));
 }
 
-fn builtin(p: &mut ChildSpawnerCommands, a: &BusAssets, body: &Handle<StandardMaterial>, look: Look, w: f32, h: f32, len: f32) {
+fn builtin(
+    p: &mut ChildSpawnerCommands,
+    a: &BusAssets,
+    body: &Handle<StandardMaterial>,
+    look: Look,
+    w: f32,
+    h: f32,
+    len: f32,
+) {
     let half = len / 2.0;
     let axles: Vec<f32>;
     match look {
         Look::Solo | Look::Mini | Look::Double => {
-            segment(p, a, body, &Segment { z: 0.0, len, front: true, rear: true }, w, h);
+            segment(
+                p,
+                a,
+                body,
+                &Segment {
+                    z: 0.0,
+                    len,
+                    front: true,
+                    rear: true,
+                },
+                w,
+                h,
+            );
             if look == Look::Double {
                 // Belt between the decks, roof overhang and a stair window.
-                part(p, &a.cube, body, Vec3::new(0.0, 2.38, 0.0), Vec3::new(w + 0.07, 0.24, len));
-                part(p, &a.cube, &a.white, Vec3::new(0.0, h + 0.02, 0.0), Vec3::new(w + 0.06, 0.06, len + 0.1));
+                part(
+                    p,
+                    &a.cube,
+                    body,
+                    Vec3::new(0.0, 2.38, 0.0),
+                    Vec3::new(w + 0.07, 0.24, len),
+                );
+                part(
+                    p,
+                    &a.cube,
+                    &a.white,
+                    Vec3::new(0.0, h + 0.02, 0.0),
+                    Vec3::new(w + 0.06, 0.06, len + 0.1),
+                );
             }
-            axles = if look != Look::Mini { vec![half - 1.9, -half + 2.4] } else { vec![half - 1.3, -half + 1.4] };
+            axles = if look != Look::Mini {
+                vec![half - 1.9, -half + 2.4]
+            } else {
+                vec![half - 1.3, -half + 1.4]
+            };
         }
         Look::Articulated => {
             // Front part, flexible joint, rear part.
@@ -162,11 +313,47 @@ fn builtin(p: &mut ChildSpawnerCommands, a: &BusAssets, body: &Handle<StandardMa
             let rear_len = len - front_len - joint;
             let front_z = half - front_len / 2.0;
             let rear_z = -half + rear_len / 2.0;
-            segment(p, a, body, &Segment { z: front_z, len: front_len, front: true, rear: false }, w, h);
-            segment(p, a, body, &Segment { z: rear_z, len: rear_len, front: false, rear: true }, w, h);
+            segment(
+                p,
+                a,
+                body,
+                &Segment {
+                    z: front_z,
+                    len: front_len,
+                    front: true,
+                    rear: false,
+                },
+                w,
+                h,
+            );
+            segment(
+                p,
+                a,
+                body,
+                &Segment {
+                    z: rear_z,
+                    len: rear_len,
+                    front: false,
+                    rear: true,
+                },
+                w,
+                h,
+            );
             let jz = -half + rear_len + joint / 2.0;
-            part(p, &a.cube, &a.dark, Vec3::new(0.0, 0.35 + (h - 0.6) / 2.0, jz), Vec3::new(w - 0.14, h - 0.6, joint + 0.05));
-            part(p, &a.cube, &a.white, Vec3::new(0.0, h - 0.1, jz), Vec3::new(w - 0.3, 0.2, joint + 0.05));
+            part(
+                p,
+                &a.cube,
+                &a.dark,
+                Vec3::new(0.0, 0.35 + (h - 0.6) / 2.0, jz),
+                Vec3::new(w - 0.14, h - 0.6, joint + 0.05),
+            );
+            part(
+                p,
+                &a.cube,
+                &a.white,
+                Vec3::new(0.0, h - 0.1, jz),
+                Vec3::new(w - 0.3, 0.2, joint + 0.05),
+            );
             axles = vec![half - 1.8, front_z - front_len / 2.0 + 1.3, -half + 1.8];
         }
     }
@@ -196,11 +383,18 @@ pub fn spawn_bus_visual(
                 ..default()
             });
             let (look, w, h, l) = (*look, spec.width, spec.height, spec.length);
-            commands.entity(root).with_children(|p| builtin(p, assets, &body, look, w, h, l));
+            commands
+                .entity(root)
+                .with_children(|p| builtin(p, assets, &body, look, w, h, l));
         }
-        Model::Gltf { asset, rot_y, scale } => {
+        Model::Gltf {
+            asset,
+            rot_y,
+            scale,
+        } => {
             let scene: Handle<Scene> = asset_server.load(format!("{asset}#Scene0"));
-            let tf = Transform::from_rotation(Quat::from_rotation_y(rot_y.to_radians())).with_scale(Vec3::splat(*scale));
+            let tf = Transform::from_rotation(Quat::from_rotation_y(rot_y.to_radians()))
+                .with_scale(Vec3::splat(*scale));
             commands.entity(root).with_children(|p| {
                 p.spawn((SceneRoot(scene), tf));
             });

@@ -20,20 +20,34 @@ pub struct UiFonts {
 /// Called while building the app, so the fonts exist before the very first state transition
 /// (the menu's OnEnter system runs before any Startup commands are applied).
 pub fn install_fonts(world: &mut World) {
-    let regular = Font::try_from_bytes(include_bytes!("../assets/fonts/Inter-Regular.otf").to_vec())
-        .expect("embedded font");
+    let regular =
+        Font::try_from_bytes(include_bytes!("../assets/fonts/Inter-Regular.otf").to_vec())
+            .expect("embedded font");
     let bold = Font::try_from_bytes(include_bytes!("../assets/fonts/Inter-SemiBold.otf").to_vec())
         .expect("embedded font");
     let mut fonts = world.resource_mut::<Assets<Font>>();
-    let fonts = UiFonts { regular: fonts.add(regular), bold: fonts.add(bold) };
+    let fonts = UiFonts {
+        regular: fonts.add(regular),
+        bold: fonts.add(bold),
+    };
     world.insert_resource(fonts);
 }
 
-pub fn text(fonts: &UiFonts, bold: bool, size: f32, color: Color, s: impl Into<String>) -> impl Bundle {
+pub fn text(
+    fonts: &UiFonts,
+    bold: bool,
+    size: f32,
+    color: Color,
+    s: impl Into<String>,
+) -> impl Bundle {
     (
         Text::new(s),
         TextFont {
-            font: if bold { fonts.bold.clone() } else { fonts.regular.clone() },
+            font: if bold {
+                fonts.bold.clone()
+            } else {
+                fonts.regular.clone()
+            },
             font_size: size,
             ..default()
         },
@@ -73,6 +87,12 @@ pub enum Action {
     Fire(u32),
     AdoptRoute(usize),
     RoutePage(i32),
+    MenuGo(crate::menu::Screen),
+    Exit,
+    ToggleFullscreen,
+    ToggleVsync,
+    UiScaleStep(i32),
+    ToggleLines,
 }
 
 #[derive(Event)]
@@ -95,12 +115,29 @@ pub enum BtnKind {
     Small,
 }
 
-pub fn button(fonts: &UiFonts, label: impl Into<String>, action: Action, kind: BtnKind) -> impl Bundle {
+pub fn button(
+    fonts: &UiFonts,
+    label: impl Into<String>,
+    action: Action,
+    kind: BtnKind,
+) -> impl Bundle {
     let primary = kind == BtnKind::Primary;
     let (normal, hover, pressed, fg, border) = if primary {
-        (style::ACCENT, style::ACCENT_HOVER, style::ACCENT_PRESS, style::WHITE, style::ACCENT)
+        (
+            style::PRIMARY,
+            style::PRIMARY_HOVER,
+            style::PRIMARY_PRESS,
+            style::WHITE,
+            style::PRIMARY,
+        )
     } else {
-        (style::BTN, style::BTN_HOVER, style::BTN_PRESS, style::TEXT, style::PANEL_BORDER)
+        (
+            style::BTN,
+            style::BTN_HOVER,
+            style::BTN_PRESS,
+            style::TEXT,
+            style::PANEL_BORDER,
+        )
     };
     let small = kind == BtnKind::Small;
     (
@@ -119,14 +156,27 @@ pub fn button(fonts: &UiFonts, label: impl Into<String>, action: Action, kind: B
         BackgroundColor(normal),
         BorderColor(border),
         BorderRadius::all(Val::Px(8.0)),
-        ButtonColors { normal, hover, pressed, border, toggle: kind == BtnKind::Toggle },
+        ButtonColors {
+            normal,
+            hover,
+            pressed,
+            border,
+            toggle: kind == BtnKind::Toggle,
+        },
         action,
-        children![text(fonts, true, if small { 13.0 } else { 14.0 }, fg, label)],
+        children![text(
+            fonts,
+            true,
+            if small { 13.0 } else { 14.0 },
+            fg,
+            label
+        )],
     )
 }
 
-fn is_active(action: Action, vtime: &Time<Virtual>, view: View) -> bool {
+fn is_active(action: Action, vtime: &Time<Virtual>, view: View, lines_open: bool) -> bool {
     match action {
+        Action::ToggleLines => lines_open,
         Action::SetView(v) => view == v,
         Action::Pause => vtime.is_paused(),
         Action::Speed(n) => !vtime.is_paused() && (vtime.relative_speed() - n as f32).abs() < 0.01,
@@ -137,10 +187,17 @@ fn is_active(action: Action, vtime: &Time<Virtual>, view: View) -> bool {
 pub fn button_visuals(
     vtime: Res<Time<Virtual>>,
     view: Res<View>,
-    mut q: Query<(&Interaction, &ButtonColors, &Action, &mut BackgroundColor, &mut BorderColor)>,
+    lines_open: Res<LinesOpen>,
+    mut q: Query<(
+        &Interaction,
+        &ButtonColors,
+        &Action,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
 ) {
     for (interaction, c, action, mut bg, mut border) in &mut q {
-        let (nb, nd) = if c.toggle && is_active(*action, &vtime, *view) {
+        let (nb, nd) = if c.toggle && is_active(*action, &vtime, *view, lines_open.0) {
             (style::ACCENT_LIGHT, style::ACCENT)
         } else {
             let b = match interaction {
@@ -259,7 +316,126 @@ fn stat(fonts: &UiFonts, label: &str, kind: Stat) -> impl Bundle {
     )
 }
 
-pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
+pub const SIDEBAR_W: f32 = 82.0;
+
+/// Icons of the navigation sidebar (white on transparent, tinted by the buttons).
+#[derive(Resource)]
+pub struct NavIcons {
+    pub map: Handle<Image>,
+    pub depot: Handle<Image>,
+    pub staff: Handle<Image>,
+    pub lines: Handle<Image>,
+    pub menu: Handle<Image>,
+}
+
+pub fn install_nav_icons(world: &mut World) {
+    use bevy::{
+        asset::RenderAssetUsages,
+        image::{CompressedImageFormats, ImageSampler, ImageType},
+    };
+    let mut images = world.resource_mut::<Assets<Image>>();
+    let mut load = |bytes: &[u8]| {
+        let img = Image::from_buffer(
+            bytes,
+            ImageType::Extension("png"),
+            CompressedImageFormats::NONE,
+            true,
+            ImageSampler::linear(),
+            RenderAssetUsages::default(),
+        )
+        .expect("embedded icon");
+        images.add(img)
+    };
+    let icons = NavIcons {
+        map: load(include_bytes!("../assets/icons/map.png")),
+        depot: load(include_bytes!("../assets/icons/depot.png")),
+        staff: load(include_bytes!("../assets/icons/staff.png")),
+        lines: load(include_bytes!("../assets/icons/lines.png")),
+        menu: load(include_bytes!("../assets/icons/menu.png")),
+    };
+    world.insert_resource(icons);
+}
+
+fn nav_button(
+    p: &mut ChildSpawnerCommands,
+    f: &UiFonts,
+    icon: &Handle<Image>,
+    label: &str,
+    action: Action,
+) {
+    p.spawn((
+        Button,
+        action,
+        Node {
+            width: Val::Px(SIDEBAR_W - 16.0),
+            padding: UiRect::axes(Val::Px(4.0), Val::Px(9.0)),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(4.0),
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(style::PANEL),
+        BorderColor(Color::NONE),
+        BorderRadius::all(Val::Px(10.0)),
+        ButtonColors {
+            normal: Color::NONE,
+            hover: style::BTN_HOVER,
+            pressed: style::BTN_PRESS,
+            border: Color::NONE,
+            toggle: true,
+        },
+        children![
+            (
+                ImageNode::new(icon.clone()).with_color(style::TEXT),
+                Node {
+                    width: Val::Px(28.0),
+                    height: Val::Px(28.0),
+                    ..default()
+                },
+            ),
+            text(f, true, 11.0, style::TEXT, label.to_string()),
+        ],
+    ));
+}
+
+/// Whether the Lines panel is shown on the map.
+#[derive(Resource)]
+pub struct LinesOpen(pub bool);
+
+impl Default for LinesOpen {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+#[derive(Component)]
+pub struct LinesPanel;
+
+pub fn ui_toggles(mut events: EventReader<UiAction>, mut open: ResMut<LinesOpen>) {
+    for UiAction(a) in events.read() {
+        if *a == Action::ToggleLines {
+            open.0 = !open.0;
+        }
+    }
+}
+
+pub fn lines_panel_visibility(
+    open: Res<LinesOpen>,
+    view: Res<View>,
+    tool: Res<crate::Tool>,
+    mut q: Query<&mut Node, With<LinesPanel>>,
+) {
+    let show = open.0 && *view == View::Map && *tool == crate::Tool::Idle;
+    for mut n in &mut q {
+        let want = if show { Display::Flex } else { Display::None };
+        if n.display != want {
+            n.display = want;
+        }
+    }
+}
+
+pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<NavIcons>) {
     let f = &*fonts;
 
     // Top bar
@@ -283,32 +459,80 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
         children![
             stat(f, "MONEY", Stat::Money),
             stat(f, "PROFIT", Stat::Profit),
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            (
+                Node {
+                    column_gap: Val::Px(14.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                children![
+                    stat(f, "TIME", Stat::Clock),
+                    (
+                        Node {
+                            column_gap: Val::Px(6.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        children![
+                            button(f, "Pause", Action::Pause, BtnKind::Toggle),
+                            button(f, "1x", Action::Speed(1), BtnKind::Toggle),
+                            button(f, "4x", Action::Speed(4), BtnKind::Toggle),
+                            button(f, "10x", Action::Speed(10), BtnKind::Toggle),
+                        ]
+                    ),
+                ]
+            ),
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
             stat(f, "RIDERS CARRIED", Stat::Riders),
             stat(f, "WAITING", Stat::Waiting),
             stat(f, "BUSES", Stat::Buses),
-            stat(f, "TIME", Stat::Clock),
-            Node { flex_grow: 1.0, ..default() },
-            (
-                Node { column_gap: Val::Px(8.0), align_items: AlignItems::Center, ..default() },
-                children![
-                    button(f, "Map", Action::SetView(View::Map), BtnKind::Toggle),
-                    button(f, "Depot", Action::SetView(View::Depot), BtnKind::Toggle),
-                    button(f, "Staff", Action::SetView(View::Staff), BtnKind::Toggle),
-                    Node { width: Val::Px(10.0), ..default() },
-                    button(f, "Pause", Action::Pause, BtnKind::Toggle),
-                    button(f, "1x", Action::Speed(1), BtnKind::Toggle),
-                    button(f, "4x", Action::Speed(4), BtnKind::Toggle),
-                    button(f, "10x", Action::Speed(10), BtnKind::Toggle),
-                    button(f, "Menu", Action::Menu, BtnKind::Normal),
-                ]
-            ),
         ],
     ));
+
+    // Left navigation sidebar
+    commands
+        .spawn((
+            GameUi,
+            Interaction::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(62.0),
+                left: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Px(SIDEBAR_W),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(8.0), Val::Px(12.0)),
+                row_gap: Val::Px(8.0),
+                border: UiRect::right(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(style::PANEL),
+            BorderColor(style::PANEL_BORDER),
+        ))
+        .with_children(|p| {
+            nav_button(p, f, &icons.map, "Map", Action::SetView(View::Map));
+            nav_button(p, f, &icons.depot, "Depot", Action::SetView(View::Depot));
+            nav_button(p, f, &icons.staff, "Staff", Action::SetView(View::Staff));
+            nav_button(p, f, &icons.lines, "Lines", Action::ToggleLines);
+            p.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            });
+            nav_button(p, f, &icons.menu, "Menu", Action::Menu);
+        });
 
     // Lines panel
     commands.spawn((
         GameUi,
-        MapUi,
+        LinesPanel,
         Interaction::default(),
         Node {
             position_type: PositionType::Absolute,
@@ -328,7 +552,11 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             text(f, true, 16.0, style::TEXT, "Lines"),
             (
                 LinesList,
-                Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), ..default() }
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                }
             ),
         ],
     ));
@@ -359,10 +587,20 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             children![
                 (
                     IdleTools,
-                    Node { align_items: AlignItems::Center, column_gap: Val::Px(14.0), ..default() },
+                    Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(14.0),
+                        ..default()
+                    },
                     children![
                         button(f, "New line  (N)", Action::NewLine, BtnKind::Primary),
-                        text(f, false, 13.0, style::MUTED, "Then click bus stops on the map, in order"),
+                        text(
+                            f,
+                            false,
+                            13.0,
+                            style::MUTED,
+                            "Then click bus stops on the map, in order"
+                        ),
                     ]
                 ),
                 (
@@ -398,7 +636,10 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>) {
             ..default()
         },
         children![(
-            Node { padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)), ..default() },
+            Node {
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+                ..default()
+            },
             BackgroundColor(style::DARK),
             BorderRadius::all(Val::Px(10.0)),
             children![(ToastText, text(f, false, 14.0, style::WHITE, ""))]
@@ -435,8 +676,22 @@ pub fn update_stats(
     let profit = eco.income - eco.costs;
     for (stat, mut t, mut col) in &mut q {
         let (s, c) = match stat.0 {
-            Stat::Money => (fmt_money(eco.money), if eco.money < 0.0 { style::DANGER } else { style::TEXT }),
-            Stat::Profit => (fmt_signed(profit), if profit < 0.0 { style::DANGER } else { style::ACCENT }),
+            Stat::Money => (
+                fmt_money(eco.money),
+                if eco.money < 0.0 {
+                    style::DANGER
+                } else {
+                    style::TEXT
+                },
+            ),
+            Stat::Profit => (
+                fmt_signed(profit),
+                if profit < 0.0 {
+                    style::DANGER
+                } else {
+                    style::ACCENT
+                },
+            ),
             Stat::Riders => (group_digits(eco.boarded as i64), style::TEXT),
             Stat::Waiting => (format!("{}", waiting as i64), style::TEXT),
             Stat::Buses => (format!("{bus_count} / {}", fleet.buses.len()), style::TEXT),
@@ -461,7 +716,12 @@ pub fn update_lines_panel(
     list: Single<Entity, With<LinesList>>,
 ) {
     *timer += real.delta_secs();
-    if !lines.is_changed() && !fleet.is_changed() && *timer < 1.0 && *timer > 0.0 && !fonts.is_changed() {
+    if !lines.is_changed()
+        && !fleet.is_changed()
+        && *timer < 1.0
+        && *timer > 0.0
+        && !fonts.is_changed()
+    {
         // Rebuild only on changes or once a second (for the profit numbers).
         return;
     }
@@ -482,19 +742,36 @@ pub fn update_lines_panel(
         }
         for (i, line) in lines.0.iter().enumerate() {
             let profit = line.income - line.cost;
-            let profit_color = if profit < 0.0 { style::DANGER } else { style::ACCENT };
+            let profit_color = if profit < 0.0 {
+                style::DANGER
+            } else {
+                style::ACCENT
+            };
             let assigned = fleet.assigned_count(i);
             let running = fleet.running_count(i);
             p.spawn((
-                Node { align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() },
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
                 children![
                     (
-                        Node { width: Val::Px(10.0), height: Val::Px(58.0), ..default() },
+                        Node {
+                            width: Val::Px(10.0),
+                            height: Val::Px(58.0),
+                            ..default()
+                        },
                         BackgroundColor(line.color),
                         BorderRadius::all(Val::Px(5.0)),
                     ),
                     (
-                        Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: Val::Px(2.0), ..default() },
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            flex_grow: 1.0,
+                            row_gap: Val::Px(2.0),
+                            ..default()
+                        },
                         children![
                             text(f, true, 14.0, style::TEXT, line.name.clone()),
                             text(
@@ -502,12 +779,25 @@ pub fn update_lines_panel(
                                 false,
                                 12.0,
                                 profit_color,
-                                format!("{assigned} bus{} ({running} out) · {}", if assigned == 1 { "" } else { "es" }, fmt_signed(profit))
+                                format!(
+                                    "{assigned} bus{} ({running} out) · {}",
+                                    if assigned == 1 { "" } else { "es" },
+                                    fmt_signed(profit)
+                                )
                             ),
                             (
-                                Node { column_gap: Val::Px(4.0), margin: UiRect::top(Val::Px(3.0)), ..default() },
+                                Node {
+                                    column_gap: Val::Px(4.0),
+                                    margin: UiRect::top(Val::Px(3.0)),
+                                    ..default()
+                                },
                                 children![
-                                    button(f, "Timetable", Action::OpenTimetable(i), BtnKind::Small),
+                                    button(
+                                        f,
+                                        "Timetable",
+                                        Action::OpenTimetable(i),
+                                        BtnKind::Small
+                                    ),
                                     button(f, "–", Action::RemoveBus(i), BtnKind::Small),
                                     button(f, "+ Bus", Action::AddBus(i), BtnKind::Small),
                                 ]
@@ -528,7 +818,11 @@ pub fn update_toolbar(
     mut label: Single<&mut Text, With<DrawText>>,
 ) {
     let drawing = *tool == Tool::Drawing;
-    let (i, d) = if drawing { (Display::None, Display::Flex) } else { (Display::Flex, Display::None) };
+    let (i, d) = if drawing {
+        (Display::None, Display::Flex)
+    } else {
+        (Display::Flex, Display::None)
+    };
     if idle.display != i {
         idle.display = i;
     }
@@ -537,7 +831,11 @@ pub fn update_toolbar(
     }
     let n = draft.stop_count();
     let w = draft.0.len() - n;
-    let s = format!("New line · {n} stop{} · {w} waypoint{}", if n == 1 { "" } else { "s" }, if w == 1 { "" } else { "s" });
+    let s = format!(
+        "New line · {n} stop{} · {w} waypoint{}",
+        if n == 1 { "" } else { "s" },
+        if w == 1 { "" } else { "s" }
+    );
     if label.0 != s {
         label.0 = s;
     }
@@ -555,7 +853,10 @@ pub fn update_tooltip(
         Some(i) => {
             let stop = &map.stops[i];
             let waiting = queues.waiting.get(i).copied().unwrap_or(0.0).floor();
-            text.0 = format!("{}\n{} waiting · demand {:.1}", stop.name, waiting as i64, stop.demand);
+            text.0 = format!(
+                "{}\n{} waiting · demand {:.1}",
+                stop.name, waiting as i64, stop.demand
+            );
             node.display = Display::Flex;
             node.left = Val::Px((hover.cursor.x + 16.0).min(window.width() - 220.0).max(4.0));
             node.top = Val::Px((hover.cursor.y + 20.0).min(window.height() - 60.0).max(4.0));
