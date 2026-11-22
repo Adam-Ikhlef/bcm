@@ -149,51 +149,44 @@ fn menu_screens(
         });
 }
 
-/// A big menu button. With `action == None` it is shown greyed out and does nothing.
+/// A big, centred menu button in one of the bright colours. With `action == None` it is greyed out.
 fn spawn_menu_button(
     p: &mut ChildSpawnerCommands,
     f: &UiFonts,
     label: &str,
     action: Option<Action>,
-    tag: &str,
+    color: Color,
 ) {
     let enabled = action.is_some();
-    let (normal, hover, pressed) = if enabled {
-        (style::BTN, style::BTN_HOVER, style::BTN_PRESS)
-    } else {
-        (
-            style::BTN_DISABLED,
-            style::BTN_DISABLED,
-            style::BTN_DISABLED,
-        )
-    };
-    let fg = if enabled { style::TEXT } else { style::MUTED };
+    let base = if enabled { color } else { style::BTN_DISABLED };
+    let fg = if enabled { style::WHITE } else { style::MUTED };
     let mut e = p.spawn((
         Node {
-            width: Val::Px(340.0),
-            padding: UiRect::axes(Val::Px(22.0), Val::Px(14.0)),
-            justify_content: JustifyContent::SpaceBetween,
+            width: Val::Px(300.0),
+            padding: UiRect::axes(Val::Px(18.0), Val::Px(12.0)),
+            justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(1.0)),
+            border: UiRect::all(Val::Px(2.0)),
             ..default()
         },
-        BackgroundColor(normal),
-        BorderColor(style::PANEL_BORDER),
-        BorderRadius::all(Val::Px(10.0)),
-        children![
-            text(f, true, 19.0, fg, label.to_string()),
-            text(f, false, 12.0, style::MUTED, tag.to_string()),
-        ],
+        BackgroundColor(base),
+        BorderColor(if enabled {
+            color.mix(&Color::WHITE, 0.35)
+        } else {
+            style::PANEL_BORDER
+        }),
+        BorderRadius::all(Val::Px(9.0)),
+        children![text(f, true, 21.0, fg, label.to_string())],
     ));
     if let Some(a) = action {
         e.insert((
             Button,
             a,
             ButtonColors {
-                normal,
-                hover,
-                pressed,
-                border: style::PANEL_BORDER,
+                normal: color,
+                hover: color.mix(&Color::WHITE, 0.2),
+                pressed: color.mix(&Color::BLACK, 0.2),
+                border: color.mix(&Color::WHITE, 0.35),
                 toggle: false,
             },
         ));
@@ -216,8 +209,11 @@ fn illustration(p: &mut ChildSpawnerCommands, f: &UiFonts) {
     };
     p.spawn((
         Node {
-            flex_grow: 1.0,
-            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
             overflow: Overflow::clip(),
             ..default()
         },
@@ -421,72 +417,103 @@ fn illustration(p: &mut ChildSpawnerCommands, f: &UiFonts) {
 }
 
 fn main_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
+    illustration(root, f);
+    root.spawn((Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        right: Val::Px(0.0),
+        top: Val::Px(0.0),
+        bottom: Val::Px(0.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        padding: UiRect::top(Val::Px(34.0)),
+        row_gap: Val::Px(10.0),
+        ..default()
+    },))
+        .with_children(|c| {
+            c.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    margin: UiRect::bottom(Val::Px(18.0)),
+                    ..default()
+                },
+                children![
+                    text(f, true, 66.0, style::WHITE, "Bus Manager"),
+                    text(
+                        f,
+                        false,
+                        17.0,
+                        style::AMBER,
+                        "Build a bus network on real city maps"
+                    ),
+                ],
+            ));
+            spawn_menu_button(c, f, "Continue", None, style::CBM_GREEN);
+            spawn_menu_button(c, f, "Load Game", None, style::CBM_BLUE);
+            spawn_menu_button(
+                c,
+                f,
+                "New Game",
+                Some(Action::MenuGo(Screen::NewGame)),
+                style::CBM_GREEN,
+            );
+            spawn_menu_button(
+                c,
+                f,
+                "Options",
+                Some(Action::MenuGo(Screen::Options)),
+                style::CBM_BLUE,
+            );
+            spawn_menu_button(
+                c,
+                f,
+                "Credits",
+                Some(Action::MenuGo(Screen::Credits)),
+                style::CBM_BLUE,
+            );
+            spawn_menu_button(c, f, "Exit", Some(Action::Exit), style::CBM_RED);
+        });
+    // Bottom-left: version. Bottom-right: links.
     root.spawn((
         Node {
-            width: Val::Px(560.0),
-            height: Val::Percent(100.0),
+            position_type: PositionType::Absolute,
+            left: Val::Px(18.0),
+            bottom: Val::Px(14.0),
             flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            padding: UiRect::axes(Val::Px(64.0), Val::Px(40.0)),
-            row_gap: Val::Px(12.0),
-            border: UiRect::right(Val::Px(1.0)),
+            row_gap: Val::Px(3.0),
             ..default()
         },
-        BackgroundColor(style::PANEL),
-        BorderColor(style::PANEL_BORDER),
-    ))
-    .with_children(|c| {
-        c.spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                margin: UiRect::bottom(Val::Px(26.0)),
-                ..default()
-            },
-            children![
-                text(f, true, 56.0, style::TEXT, "BUS MANAGER"),
-                text(
-                    f,
-                    false,
-                    16.0,
-                    style::AMBER,
-                    "Build a bus network on real city maps"
-                ),
-            ],
-        ));
-        spawn_menu_button(c, f, "Continue", None, "soon");
-        spawn_menu_button(c, f, "Load Game", None, "soon");
-        spawn_menu_button(c, f, "New Game", Some(Action::MenuGo(Screen::NewGame)), "");
-        spawn_menu_button(c, f, "Options", Some(Action::MenuGo(Screen::Options)), "");
-        spawn_menu_button(c, f, "Exit", Some(Action::Exit), "");
-        c.spawn(Node {
-            flex_grow: 1.0,
-            ..default()
-        });
-        c.spawn((
-            Node {
-                width: Val::Px(340.0),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            children![text(
+        children![
+            text(
+                f,
+                true,
+                14.0,
+                style::TEXT,
+                format!("{}  ·  early development", crate::VERSION)
+            ),
+            text(
                 f,
                 false,
-                12.0,
+                11.0,
                 style::MUTED,
-                format!("Version {}  ·  early development", crate::VERSION)
-            ),],
-        ))
-        .with_children(|r| link_button(r, f, "Credits", Action::MenuGo(Screen::Credits)));
-        c.spawn(text(
-            f,
-            false,
-            11.0,
-            style::MUTED,
-            "Map data © OpenStreetMap contributors",
-        ));
-    });
-    illustration(root, f);
+                "Map data © OpenStreetMap contributors"
+            ),
+        ],
+    ));
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(18.0),
+            bottom: Val::Px(14.0),
+            column_gap: Val::Px(8.0),
+            ..default()
+        },
+        children![
+            button(f, "Ko-fi", Action::OpenLink(0), BtnKind::Small),
+            button(f, "GitHub", Action::OpenLink(1), BtnKind::Small),
+        ],
+    ));
 }
 
 /// A centered panel with a title and a Back button, used by the sub screens.
@@ -668,6 +695,20 @@ fn options_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, s: &Settings) {
                     )],
                 ));
                 c.spawn(button(f, "+", Action::UiScaleStep(1), BtnKind::Small));
+            },
+        );
+        option_row(
+            p,
+            f,
+            "Check for updates",
+            "Look for a new version every time the game starts",
+            |c| {
+                c.spawn(button(
+                    f,
+                    if s.check_updates { "On" } else { "Off" },
+                    Action::ToggleUpdateCheck,
+                    BtnKind::Small,
+                ));
             },
         );
         p.spawn(text(
@@ -855,6 +896,15 @@ fn menu_actions(
             }
             Action::ToggleVsync => {
                 settings.vsync = !settings.vsync;
+                settings.save();
+            }
+            Action::OpenLink(i) => {
+                if let Some(u) = crate::update::LINKS.get(i as usize) {
+                    crate::update::open_url(u);
+                }
+            }
+            Action::ToggleUpdateCheck => {
+                settings.check_updates = !settings.check_updates;
                 settings.save();
             }
             Action::UiScaleStep(d) => {

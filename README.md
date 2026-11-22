@@ -122,6 +122,12 @@ under "Real routes (OSM)" (search by number or name); picking one fills the stop
 before pressing Finish. Cities downloaded with older versions keep working but have no real routes until
 they are downloaded again (delete the city's cache file in the BusManager `cache` folder).
 
+## Updates
+
+On every launch the game checks the GitHub Releases of this repository in the background. If a newer
+version exists, a dialog shows the changelog (the release notes) with **Download** (opens the release page)
+and **Remind me later**. Turn the check off in Options. It stays silent when offline or when the repository is private.
+
 ## Bus mods
 
 Four categories: Minibus, Solo bus, Double-decker, Articulated (10 built-in buses; shop tabs per category). Add your own by dropping a folder into
@@ -139,4 +145,5 @@ below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.js
 - [ ] Real demand from buildings/POIs and passenger destinations
 - [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
 - [ ] Per-line profit graphs, bus upgrades, loans
-- [ ] Save/load
+- [x] Update checker with changelog
+- [ ] Save/load, game modes (Casual / Realistic / Sandbox)

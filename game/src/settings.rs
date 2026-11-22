@@ -13,6 +13,8 @@ pub struct Settings {
     pub vsync: bool,
     /// Size of the interface, 0.75 ..= 1.5.
     pub ui_scale: f32,
+    /// Look for a newer release on every launch.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -21,6 +23,7 @@ impl Default for Settings {
             fullscreen: false,
             vsync: true,
             ui_scale: 1.0,
+            check_updates: true,
         }
     }
 }

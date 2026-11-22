@@ -12,6 +12,7 @@ mod settings;
 mod staffui;
 mod style;
 mod ui;
+mod update;
 
 use std::sync::Arc;
 
@@ -243,7 +244,7 @@ fn main() {
         }
     }
 
-    app.add_plugins(menu::MenuPlugin)
+    app.add_plugins((menu::MenuPlugin, update::UpdatePlugin))
         .add_systems(Startup, render::configure_gizmos)
         .add_systems(
             Update,

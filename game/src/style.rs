@@ -13,8 +13,8 @@ pub const PLAN_BG: Color = rgb(0x9c, 0xd0, 0x80); // deeper green while planning
 
 // UI (dark theme: deep navy panels, bright green accent, amber highlights)
 pub const BG: Color = rgb(0x0b, 0x10, 0x18);
-pub const PANEL: Color = Color::srgba(0.075, 0.098, 0.133, 0.95);
-pub const PANEL_BORDER: Color = rgb(0x2b, 0x37, 0x48);
+pub const PANEL: Color = Color::srgba(0.19, 0.225, 0.26, 0.96);
+pub const PANEL_BORDER: Color = rgb(0x4d, 0x5b, 0x6c);
 pub const TEXT: Color = rgb(0xe8, 0xed, 0xf3);
 pub const MUTED: Color = rgb(0x8a, 0x98, 0xab);
 /// Bright green for lines, rings and positive numbers.
@@ -27,11 +27,20 @@ pub const PRIMARY_PRESS: Color = rgb(0x18, 0x77, 0x40);
 pub const ACCENT_LIGHT: Color = rgb(0x1b, 0x3d, 0x2c);
 pub const AMBER: Color = rgb(0xff, 0xb4, 0x20);
 pub const DANGER: Color = rgb(0xff, 0x6b, 0x5e);
-pub const BTN: Color = rgb(0x1d, 0x27, 0x36);
-pub const BTN_HOVER: Color = rgb(0x28, 0x35, 0x49);
-pub const BTN_PRESS: Color = rgb(0x32, 0x42, 0x5b);
-pub const BTN_DISABLED: Color = rgb(0x15, 0x1c, 0x28);
+pub const BTN: Color = rgb(0x2f, 0x39, 0x46);
+pub const BTN_HOVER: Color = rgb(0x3d, 0x4a, 0x5a);
+pub const BTN_PRESS: Color = rgb(0x4b, 0x5c, 0x72);
+pub const BTN_DISABLED: Color = rgb(0x30, 0x38, 0x42);
 /// Text input background.
-pub const INPUT: Color = rgb(0x0e, 0x14, 0x1e);
+pub const INPUT: Color = rgb(0x24, 0x2b, 0x34);
 pub const DARK: Color = Color::srgba(0.04, 0.06, 0.09, 0.94);
 pub const WHITE: Color = Color::WHITE;
+
+// Bright "toy" colours for the toolbar and the main-menu buttons
+pub const CBM_BLUE: Color = rgb(0x3f, 0xa2, 0xe0);
+pub const CBM_GREEN: Color = rgb(0x3d, 0xb8, 0x68);
+pub const CBM_ORANGE: Color = rgb(0xf2, 0x9a, 0x2e);
+pub const CBM_PURPLE: Color = rgb(0x8a, 0x5c, 0xd6);
+pub const CBM_RED: Color = rgb(0xe2, 0x47, 0x5c);
+/// Opaque version of PANEL, for dialogs drawn over other UI.
+pub const PANEL_SOLID: Color = rgb(0x30, 0x39, 0x43);

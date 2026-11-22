@@ -93,6 +93,10 @@ pub enum Action {
     ToggleVsync,
     UiScaleStep(i32),
     ToggleLines,
+    OpenLink(u8),
+    UpdateDownload,
+    UpdateLater,
+    ToggleUpdateCheck,
 }
 
 #[derive(Event)]
@@ -198,7 +202,12 @@ pub fn button_visuals(
 ) {
     for (interaction, c, action, mut bg, mut border) in &mut q {
         let (nb, nd) = if c.toggle && is_active(*action, &vtime, *view, lines_open.0) {
-            (style::ACCENT_LIGHT, style::ACCENT)
+            if c.border == Color::NONE {
+                // coloured toolbar button: keep its colour, add a white ring
+                (c.hover, style::WHITE)
+            } else {
+                (style::ACCENT_LIGHT, style::ACCENT)
+            }
         } else {
             let b = match interaction {
                 Interaction::Pressed => c.pressed,
@@ -316,7 +325,7 @@ fn stat(fonts: &UiFonts, label: &str, kind: Stat) -> impl Bundle {
     )
 }
 
-pub const SIDEBAR_W: f32 = 82.0;
+pub const SIDEBAR_W: f32 = 0.0;
 
 /// Icons of the navigation sidebar (white on transparent, tinted by the buttons).
 #[derive(Resource)]
@@ -356,46 +365,38 @@ pub fn install_nav_icons(world: &mut World) {
     world.insert_resource(icons);
 }
 
-fn nav_button(
-    p: &mut ChildSpawnerCommands,
-    f: &UiFonts,
-    icon: &Handle<Image>,
-    label: &str,
-    action: Action,
-) {
+fn nav_button(p: &mut ChildSpawnerCommands, icon: &Handle<Image>, color: Color, action: Action) {
+    let lighter = color.mix(&Color::WHITE, 0.18);
+    let darker = color.mix(&Color::BLACK, 0.2);
     p.spawn((
         Button,
         action,
         Node {
-            width: Val::Px(SIDEBAR_W - 16.0),
-            padding: UiRect::axes(Val::Px(4.0), Val::Px(9.0)),
-            flex_direction: FlexDirection::Column,
+            width: Val::Px(46.0),
+            height: Val::Px(46.0),
+            justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            row_gap: Val::Px(4.0),
-            border: UiRect::all(Val::Px(1.0)),
+            border: UiRect::all(Val::Px(2.0)),
             ..default()
         },
-        BackgroundColor(style::PANEL),
+        BackgroundColor(color),
         BorderColor(Color::NONE),
         BorderRadius::all(Val::Px(10.0)),
         ButtonColors {
-            normal: Color::NONE,
-            hover: style::BTN_HOVER,
-            pressed: style::BTN_PRESS,
+            normal: color,
+            hover: lighter,
+            pressed: darker,
             border: Color::NONE,
             toggle: true,
         },
-        children![
-            (
-                ImageNode::new(icon.clone()).with_color(style::TEXT),
-                Node {
-                    width: Val::Px(28.0),
-                    height: Val::Px(28.0),
-                    ..default()
-                },
-            ),
-            text(f, true, 11.0, style::TEXT, label.to_string()),
-        ],
+        children![(
+            ImageNode::new(icon.clone()).with_color(Color::WHITE),
+            Node {
+                width: Val::Px(26.0),
+                height: Val::Px(26.0),
+                ..default()
+            },
+        )],
     ));
 }
 
@@ -438,47 +439,52 @@ pub fn lines_panel_visibility(
 pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<NavIcons>) {
     let f = &*fonts;
 
-    // Top bar
+    // Bottom-left card: money, clock, speed, key numbers (like the reference game's HUD)
     commands.spawn((
         GameUi,
         Interaction::default(),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(0.0),
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            height: Val::Px(62.0),
-            padding: UiRect::horizontal(Val::Px(18.0)),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(28.0),
-            border: UiRect::bottom(Val::Px(1.0)),
+            left: Val::Px(14.0),
+            bottom: Val::Px(14.0),
+            width: Val::Px(300.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            padding: UiRect::all(Val::Px(10.0)),
+            border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
         BackgroundColor(style::PANEL),
         BorderColor(style::PANEL_BORDER),
+        BorderRadius::all(Val::Px(14.0)),
         children![
-            stat(f, "MONEY", Stat::Money),
-            stat(f, "PROFIT", Stat::Profit),
-            Node {
-                flex_grow: 1.0,
-                ..default()
-            },
             (
                 Node {
-                    column_gap: Val::Px(14.0),
+                    justify_content: JustifyContent::Center,
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(style::INPUT),
+                BorderColor(style::CBM_BLUE),
+                BorderRadius::all(Val::Px(8.0)),
+                children![(StatText(Stat::Money), text(f, true, 28.0, style::TEXT, "-"))],
+            ),
+            (
+                Node {
+                    justify_content: JustifyContent::SpaceBetween,
                     align_items: AlignItems::Center,
                     ..default()
                 },
                 children![
-                    stat(f, "TIME", Stat::Clock),
+                    (StatText(Stat::Clock), text(f, true, 14.0, style::TEXT, "-")),
                     (
                         Node {
-                            column_gap: Val::Px(6.0),
-                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(5.0),
                             ..default()
                         },
                         children![
-                            button(f, "Pause", Action::Pause, BtnKind::Toggle),
+                            button(f, "II", Action::Pause, BtnKind::Toggle),
                             button(f, "1x", Action::Speed(1), BtnKind::Toggle),
                             button(f, "4x", Action::Speed(4), BtnKind::Toggle),
                             button(f, "10x", Action::Speed(10), BtnKind::Toggle),
@@ -486,47 +492,55 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<Nav
                     ),
                 ]
             ),
-            Node {
-                flex_grow: 1.0,
-                ..default()
-            },
-            stat(f, "RIDERS CARRIED", Stat::Riders),
-            stat(f, "WAITING", Stat::Waiting),
-            stat(f, "BUSES", Stat::Buses),
+            (
+                Node {
+                    justify_content: JustifyContent::SpaceBetween,
+                    ..default()
+                },
+                children![
+                    stat(f, "PROFIT", Stat::Profit),
+                    stat(f, "RIDERS", Stat::Riders),
+                    stat(f, "WAITING", Stat::Waiting),
+                    stat(f, "BUSES", Stat::Buses),
+                ]
+            ),
         ],
     ));
 
-    // Left navigation sidebar
+    // Coloured square toolbar next to it
     commands
         .spawn((
             GameUi,
             Interaction::default(),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(62.0),
-                left: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                width: Val::Px(SIDEBAR_W),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(12.0)),
-                row_gap: Val::Px(8.0),
-                border: UiRect::right(Val::Px(1.0)),
+                left: Val::Px(328.0),
+                bottom: Val::Px(14.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                column_gap: Val::Px(8.0),
+                border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
             BackgroundColor(style::PANEL),
             BorderColor(style::PANEL_BORDER),
+            BorderRadius::all(Val::Px(12.0)),
         ))
         .with_children(|p| {
-            nav_button(p, f, &icons.map, "Map", Action::SetView(View::Map));
-            nav_button(p, f, &icons.depot, "Depot", Action::SetView(View::Depot));
-            nav_button(p, f, &icons.staff, "Staff", Action::SetView(View::Staff));
-            nav_button(p, f, &icons.lines, "Lines", Action::ToggleLines);
-            p.spawn(Node {
-                flex_grow: 1.0,
-                ..default()
-            });
-            nav_button(p, f, &icons.menu, "Menu", Action::Menu);
+            nav_button(p, &icons.map, style::CBM_BLUE, Action::SetView(View::Map));
+            nav_button(
+                p,
+                &icons.depot,
+                style::CBM_GREEN,
+                Action::SetView(View::Depot),
+            );
+            nav_button(
+                p,
+                &icons.staff,
+                style::CBM_ORANGE,
+                Action::SetView(View::Staff),
+            );
+            nav_button(p, &icons.lines, style::CBM_PURPLE, Action::ToggleLines);
+            nav_button(p, &icons.menu, style::CBM_RED, Action::Menu);
         });
 
     // Lines panel
@@ -536,7 +550,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<Nav
         Interaction::default(),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(76.0),
+            top: Val::Px(14.0),
             right: Val::Px(14.0),
             width: Val::Px(330.0),
             flex_direction: FlexDirection::Column,
@@ -567,7 +581,7 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<Nav
         MapUi,
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(16.0),
+            bottom: Val::Px(86.0),
             left: Val::Px(0.0),
             right: Val::Px(0.0),
             justify_content: JustifyContent::Center,
