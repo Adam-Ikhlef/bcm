@@ -401,7 +401,7 @@ fn company_actions(
                 settings.company_logo = company.logo.clone();
                 settings.save();
                 form.message.clear();
-                menu.screen = Screen::NewGame;
+                menu.screen = Screen::Mode;
             }
             _ => {}
         }

@@ -73,13 +73,14 @@ pub fn daily_rollover(
     mut eco: ResMut<Economy>,
     mut trips: ResMut<Trips>,
     real: Res<Time<Real>>,
+    session: Res<crate::save::Session>,
 ) {
     let day = clock.day();
     if day <= clock.last_day {
         return;
     }
     clock.last_day = day;
-    let wages = staff.daily_wages();
+    let wages = staff.daily_wages() * session.mode.wage_factor();
     eco.money -= wages;
     eco.costs += wages;
     staff.refresh_candidates(day);

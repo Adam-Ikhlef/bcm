@@ -94,6 +94,13 @@ pub enum Action {
     UiScaleStep(i32),
     ToggleLines,
     OpenLink(u8),
+    ResumeGame,
+    SaveGame,
+    ToMenu,
+    PickMode(u8),
+    Continue,
+    LoadSave(u8),
+    DeleteSave(u8),
     StaffSub(u8),
     StaffPage(i32),
     CompanyField(u8),
@@ -250,7 +257,7 @@ pub fn track_ui_block(q: Query<&Interaction>, mut block: ResMut<UiBlock>) {
     }
 }
 
-fn group_digits(n: i64) -> String {
+pub fn group_digits(n: i64) -> String {
     let s = n.abs().to_string();
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
@@ -347,6 +354,8 @@ pub struct NavIcons {
     pub menu: Handle<Image>,
     pub check: Handle<Image>,
     pub cross: Handle<Image>,
+    /// Wide "Bus Manager" logo of the main menu.
+    pub logo: Handle<Image>,
 }
 
 pub fn install_nav_icons(world: &mut World) {
@@ -375,6 +384,7 @@ pub fn install_nav_icons(world: &mut World) {
         menu: load(include_bytes!("../assets/icons/menu.png")),
         check: load(include_bytes!("../assets/icons/check.png")),
         cross: load(include_bytes!("../assets/icons/cross.png")),
+        logo: load(include_bytes!("../assets/logo.png")),
     };
     world.insert_resource(icons);
 }

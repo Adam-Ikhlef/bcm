@@ -22,3 +22,8 @@ ureq = "2"
 dirs = "6"
 # Polygon triangulation for buildings, parks and water
 earcutr = "0.4"
+# Window icon
+winit = "0.30"
+
+[build-dependencies]
+winresource = "0.1"

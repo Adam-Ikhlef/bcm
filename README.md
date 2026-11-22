@@ -1,4 +1,4 @@
-<h1 align="center">Bus Manager</h1>
+<p align="center"><img src="docs/logo.png" alt="Bus Manager" width="420"></p>
 
 <p align="center">
   A bus company management game on <b>real OpenStreetMap data</b>, built with Rust and Bevy.
@@ -22,7 +22,7 @@ Real cities from OpenStreetMap (downloaded in game), OSM-style map with German *
 a 3D depot, timetables, drivers and shifts, real bus routes and player-made bus mods.
 Targets Windows, macOS and Ubuntu.
 
-> **Status:** early development. Expect missing features (saving and loading are not implemented yet).
+> **Status:** early development. Expect missing features.
 
 ## For players: the installer
 
@@ -130,6 +130,16 @@ social media and contracts. Then you pick the city. The HUD has the money/clock 
 buttons for Map, Depot, Staff, Lines and Menu, and on the right a **minimap** (click it to move the camera),
 the Lines list and **Missions** that pay cash rewards.
 
+## Game modes, saving and loading
+
+New Game asks for your company, then a **game mode**: **Casual** (more money, cheaper drivers), **Realistic**
+(limited money, full wages) or **Sandbox** (unlimited money, no wages). The **Menu** button in the game opens the
+pause menu: Resume, Save game, or save and quit to the main menu. The game also autosaves every morning and when
+you leave to the menu. **Continue** loads the newest save; **Load Game** lists them all (Load / Delete).
+Saves are JSON files in `<user data dir>/BusManager/saves`. They store lines (stops and waypoints), timetables,
+buses and their condition, drivers, money, missions and the clock. Buses that were on the road return to the
+depot when a save is loaded.
+
 ## Updates
 
 On every launch the game checks the GitHub Releases of this repository in the background. If a newer
@@ -154,4 +164,4 @@ below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.js
 - [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
 - [ ] Per-line profit graphs, bus upgrades, loans
 - [x] Update checker with changelog
-- [ ] Save/load, game modes (Casual / Realistic / Sandbox)
+- [x] Save/load, game modes (Casual / Realistic / Sandbox)

@@ -33,7 +33,9 @@ pub enum Screen {
     #[default]
     Main,
     Company,
+    Mode,
     NewGame,
+    Load,
     Options,
     Credits,
 }
@@ -45,6 +47,9 @@ pub(crate) struct Menu {
     mode: Mode,
     results: Vec<Place>,
     cached: Vec<Place>,
+    game_mode: crate::save::GameMode,
+    saves: Vec<crate::save::SaveInfo>,
+    pending: Option<(crate::save::Session, Option<crate::save::SaveData>)>,
     selected: usize,
     status: String,
     is_error: bool,
@@ -94,6 +99,7 @@ impl Plugin for MenuPlugin {
 
 fn spawn_menu(mut commands: Commands, mut menu: ResMut<Menu>) {
     menu.cached = net::cached_cities();
+    menu.saves = crate::save::list_saves();
     menu.mode = Mode::Typing;
     menu.results.clear();
     menu.status.clear();
@@ -126,12 +132,13 @@ fn menu_screens(
     mut commands: Commands,
     fonts: Res<UiFonts>,
     icons: Res<crate::company::LogoIcons>,
+    nav: Res<crate::ui::NavIcons>,
     mut menu: ResMut<Menu>,
     settings: Res<Settings>,
     content: Single<Entity, With<MenuContent>>,
-    mut last: Local<Option<(Screen, Settings)>>,
+    mut last: Local<Option<(Screen, Settings, usize)>>,
 ) {
-    let key = (menu.screen, settings.clone());
+    let key = (menu.screen, settings.clone(), menu.saves.len());
     if last.as_ref() == Some(&key) {
         return;
     }
@@ -144,9 +151,11 @@ fn menu_screens(
     commands
         .entity(content)
         .with_children(|root| match menu.screen {
-            Screen::Main => main_screen(root, f),
+            Screen::Main => main_screen(root, f, &nav, &menu.saves),
             Screen::Company => crate::company::company_screen(root, f, &icons),
+            Screen::Mode => mode_screen(root, f),
             Screen::NewGame => new_game_screen(root, f),
+            Screen::Load => load_screen(root, f, &menu.saves),
             Screen::Options => options_screen(root, f, &settings),
             Screen::Credits => credits_screen(root, f),
         });
@@ -200,7 +209,12 @@ fn link_button(p: &mut ChildSpawnerCommands, f: &UiFonts, label: &str, action: A
     p.spawn(button(f, label.to_string(), action, BtnKind::Small));
 }
 
-fn main_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
+fn main_screen(
+    root: &mut ChildSpawnerCommands,
+    f: &UiFonts,
+    nav: &crate::ui::NavIcons,
+    saves: &[crate::save::SaveInfo],
+) {
     root.spawn((Node {
         position_type: PositionType::Absolute,
         left: Val::Px(0.0),
@@ -221,19 +235,40 @@ fn main_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
                     margin: UiRect::bottom(Val::Px(18.0)),
                     ..default()
                 },
-                children![
-                    text(f, true, 66.0, style::WHITE, "Bus Manager"),
-                    text(
-                        f,
-                        false,
-                        17.0,
-                        style::AMBER,
-                        "Build a bus network on real city maps"
-                    ),
-                ],
+                children![(
+                    // the logo is dark green: give it a light plate so it reads on any background
+                    Node {
+                        padding: UiRect::axes(Val::Px(26.0), Val::Px(14.0)),
+                        margin: UiRect::bottom(Val::Px(10.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.94)),
+                    BorderRadius::all(Val::Px(16.0)),
+                    children![(
+                        ImageNode::new(nav.logo.clone()),
+                        Node {
+                            width: Val::Px(440.0),
+                            height: Val::Px(69.5),
+                            ..default()
+                        },
+                    )]
+                ),],
             ));
-            spawn_menu_button(c, f, "Continue", None, style::CBM_GREEN);
-            spawn_menu_button(c, f, "Load Game", None, style::CBM_BLUE);
+            let has_saves = !saves.is_empty();
+            spawn_menu_button(
+                c,
+                f,
+                "Continue",
+                has_saves.then_some(Action::Continue),
+                style::CBM_GREEN,
+            );
+            spawn_menu_button(
+                c,
+                f,
+                "Load Game",
+                has_saves.then_some(Action::MenuGo(Screen::Load)),
+                style::CBM_BLUE,
+            );
             spawn_menu_button(
                 c,
                 f,
@@ -345,7 +380,7 @@ pub(crate) fn panel_screen(
 }
 
 fn new_game_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
-    panel_screen(root, f, "Choose a city", 640.0, Screen::Company, |p| {
+    panel_screen(root, f, "Choose a city", 640.0, Screen::Mode, |p| {
         p.spawn(text(
             f,
             false,
@@ -569,10 +604,23 @@ fn start_search(menu: &mut Menu, inbox: &Inbox) {
     menu.status = "Searching".into();
 }
 
-fn start_download(menu: &mut Menu, inbox: &Inbox, place: Place) {
+fn start_download(
+    menu: &mut Menu,
+    inbox: &Inbox,
+    place: Place,
+    load: Option<crate::save::SaveData>,
+) {
     if menu.mode == Mode::Busy {
         return;
     }
+    let mode = load.as_ref().map(|d| d.mode).unwrap_or(menu.game_mode);
+    menu.pending = Some((
+        crate::save::Session {
+            mode,
+            place: place.clone(),
+        },
+        load,
+    ));
     let (tx, rx) = channel();
     *inbox.0.lock().unwrap() = Some(rx);
     std::thread::spawn(move || {
@@ -596,7 +644,7 @@ fn menu_input(mut events: EventReader<KeyboardInput>, mut menu: ResMut<Menu>, in
             continue;
         }
         if menu.mode != Mode::Choosing && ev.logical_key == Key::Escape {
-            menu.screen = Screen::Company;
+            menu.screen = Screen::Mode;
             continue;
         }
 
@@ -621,7 +669,7 @@ fn menu_input(mut events: EventReader<KeyboardInput>, mut menu: ResMut<Menu>, in
                 }
                 Key::Enter => {
                     if let Some(p) = menu.results.get(menu.selected).cloned() {
-                        start_download(&mut menu, &inbox, p);
+                        start_download(&mut menu, &inbox, p, None);
                     }
                     continue;
                 }
@@ -659,6 +707,8 @@ fn menu_actions(
     inbox: Res<Inbox>,
     mut settings: ResMut<Settings>,
     mut exit: EventWriter<AppExit>,
+    mut company: ResMut<crate::company::Company>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
@@ -696,15 +746,40 @@ fn menu_actions(
                     (((settings.ui_scale * 20.0).round() + d as f32 * 2.5) / 20.0).clamp(0.75, 1.5);
                 settings.save();
             }
+            Action::PickMode(i) => {
+                if let Some(mode) = crate::save::GameMode::ALL.get(i as usize) {
+                    menu.game_mode = *mode;
+                    menu.screen = Screen::NewGame;
+                }
+            }
+            Action::Continue => {
+                if let Some(data) = menu.saves.first().map(|s| s.data.clone()) {
+                    load_save(&mut menu, &inbox, data, &mut company, &mut images);
+                }
+            }
+            Action::LoadSave(i) => {
+                if let Some(data) = menu.saves.get(i as usize).map(|s| s.data.clone()) {
+                    load_save(&mut menu, &inbox, data, &mut company, &mut images);
+                }
+            }
+            Action::DeleteSave(i) => {
+                if let Some(s) = menu.saves.get(i as usize) {
+                    crate::save::delete_save(&s.path);
+                    menu.saves = crate::save::list_saves();
+                    if menu.saves.is_empty() {
+                        menu.screen = Screen::Main;
+                    }
+                }
+            }
             Action::Search => start_search(&mut menu, &inbox),
             Action::Pick(i) => {
                 if let Some(p) = menu.results.get(i).cloned() {
-                    start_download(&mut menu, &inbox, p);
+                    start_download(&mut menu, &inbox, p, None);
                 }
             }
             Action::Cached(i) => {
                 if let Some(p) = menu.cached.get(i).cloned() {
-                    start_download(&mut menu, &inbox, p);
+                    start_download(&mut menu, &inbox, p, None);
                 }
             }
             _ => {}
@@ -749,6 +824,10 @@ fn menu_poll(
             menu.status = format!("Search failed: {e}");
         }
         NetMsg::Map(Ok(map)) => {
+            if let Some((session, load)) = menu.pending.take() {
+                commands.insert_resource(session);
+                commands.insert_resource(crate::save::PendingLoad(load));
+            }
             commands.insert_resource(map);
             next.set(AppState::Playing);
         }
@@ -819,9 +898,23 @@ fn menu_render(
     mut search: Query<(&mut Text, &mut TextColor), (With<SearchText>, Without<StatusText>)>,
     mut status: Query<(&mut Text, &mut TextColor), (With<StatusText>, Without<SearchText>)>,
 ) {
-    let (Ok(list), Ok(mut search), Ok(mut status)) =
-        (list.single(), search.single_mut(), status.single_mut())
-    else {
+    let Ok(mut status) = status.single_mut() else {
+        return;
+    };
+    // Status line (animated dots while busy)
+    let dots = if menu.mode == Mode::Busy {
+        ".".repeat((time.elapsed_secs() * 2.0) as usize % 4)
+    } else {
+        String::new()
+    };
+    status.0 .0 = format!("{}{dots}", menu.status);
+    status.1 .0 = if menu.is_error {
+        style::DANGER
+    } else {
+        style::MUTED
+    };
+
+    let (Ok(list), Ok(mut search)) = (list.single(), search.single_mut()) else {
         return;
     };
     // Search box with a blinking caret and placeholder
@@ -837,19 +930,6 @@ fn menu_render(
         search.0 .0 = format!("{}{caret}", menu.query);
         search.1 .0 = style::TEXT;
     }
-
-    // Status line (animated dots while busy)
-    let dots = if menu.mode == Mode::Busy {
-        ".".repeat((time.elapsed_secs() * 2.0) as usize % 4)
-    } else {
-        String::new()
-    };
-    status.0 .0 = format!("{}{dots}", menu.status);
-    status.1 .0 = if menu.is_error {
-        style::DANGER
-    } else {
-        style::MUTED
-    };
 
     if !menu.is_changed() {
         return;
@@ -880,6 +960,166 @@ fn menu_render(
             for (i, place) in menu.cached.iter().enumerate() {
                 p.spawn(place_row(f, place, Action::Cached(i), false));
             }
+        }
+    });
+}
+
+/// Starts loading a saved game: restores the company, then loads the city (the rest is applied when the game starts).
+fn load_save(
+    menu: &mut Menu,
+    inbox: &Inbox,
+    data: crate::save::SaveData,
+    company: &mut crate::company::Company,
+    images: &mut Assets<Image>,
+) {
+    company.name = data.company_name.clone();
+    company.logo = data.company_logo.clone();
+    company.custom = None;
+    if company.default_logo().is_none() {
+        match crate::company::load_custom(&company.logo, images) {
+            Ok(h) => company.custom = Some(h),
+            Err(_) => company.logo = "d0".into(),
+        }
+    }
+    let place = data.place.clone();
+    start_download(menu, inbox, place, Some(data));
+}
+
+fn mode_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
+    panel_screen(root, f, "Game mode", 820.0, Screen::Company, |p| {
+        p.spawn(text(
+            f,
+            false,
+            14.0,
+            style::MUTED,
+            "How do you want to play? The mode is fixed for this game.",
+        ));
+        p.spawn(Node {
+            column_gap: Val::Px(14.0),
+            ..default()
+        })
+        .with_children(|row| {
+            for (i, mode) in crate::save::GameMode::ALL.into_iter().enumerate() {
+                let c = mode.color();
+                row.spawn((
+                    Button,
+                    Action::PickMode(i as u8),
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(10.0),
+                        padding: UiRect::all(Val::Px(16.0)),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(style::BTN),
+                    BorderColor(c),
+                    BorderRadius::all(Val::Px(12.0)),
+                    ButtonColors {
+                        normal: style::BTN,
+                        hover: style::BTN_HOVER,
+                        pressed: style::BTN_PRESS,
+                        border: c,
+                        toggle: false,
+                    },
+                    children![
+                        (
+                            Node {
+                                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(c),
+                            BorderRadius::all(Val::Px(8.0)),
+                            children![text(f, true, 20.0, style::WHITE, mode.label())]
+                        ),
+                        text(f, false, 14.0, style::TEXT, mode.blurb()),
+                        text(
+                            f,
+                            true,
+                            13.0,
+                            style::AMBER,
+                            if mode == crate::save::GameMode::Sandbox {
+                                "Start money: unlimited".to_string()
+                            } else {
+                                format!(
+                                    "Start money: ${}",
+                                    crate::ui::group_digits(mode.start_money() as i64)
+                                )
+                            }
+                        ),
+                    ],
+                ));
+            }
+        });
+    });
+}
+
+fn load_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, saves: &[crate::save::SaveInfo]) {
+    panel_screen(root, f, "Load game", 760.0, Screen::Main, |p| {
+        p.spawn((StatusText, text(f, false, 14.0, style::MUTED, "")));
+        for (i, s) in saves.iter().take(8).enumerate() {
+            let d = &s.data;
+            p.spawn((
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    ..default()
+                },
+                BackgroundColor(style::BTN),
+                BorderRadius::all(Val::Px(10.0)),
+            ))
+            .with_children(|r| {
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    ..default()
+                })
+                .with_children(|c| {
+                    c.spawn(text(
+                        f,
+                        true,
+                        16.0,
+                        style::TEXT,
+                        format!(
+                            "{}{}",
+                            if d.company_name.is_empty() {
+                                "Bus company"
+                            } else {
+                                &d.company_name
+                            },
+                            if s.auto { "  (autosave)" } else { "" }
+                        ),
+                    ));
+                    c.spawn(text(
+                        f,
+                        false,
+                        13.0,
+                        style::MUTED,
+                        format!(
+                            "{} · {} · Day {} · ${}",
+                            d.place.display_name.split(',').next().unwrap_or(""),
+                            d.mode.label(),
+                            d.day(),
+                            crate::ui::group_digits(d.money() as i64)
+                        ),
+                    ));
+                });
+                r.spawn(button(
+                    f,
+                    "Load",
+                    Action::LoadSave(i as u8),
+                    BtnKind::Primary,
+                ));
+                r.spawn(button(
+                    f,
+                    "Delete",
+                    Action::DeleteSave(i as u8),
+                    BtnKind::Small,
+                ));
+            });
         }
     });
 }

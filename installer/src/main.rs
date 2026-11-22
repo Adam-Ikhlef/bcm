@@ -306,10 +306,14 @@ fn create_shortcuts(_version: &str) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
+    let icon = app_dir().join("icon.png");
+    let _ = fs::create_dir_all(app_dir());
+    let _ = fs::write(&icon, include_bytes!("../assets/icon.png"));
     let entry = format!(
-        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nComment=Build a bus network on real city maps\nExec=\"{}\"\nPath={}\nTerminal=false\nCategories=Game;Simulation;\n",
+        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nComment=Build a bus network on real city maps\nExec=\"{}\"\nPath={}\nIcon={}\nTerminal=false\nCategories=Game;Simulation;\n",
         game_exe().display(),
-        app_dir().display()
+        app_dir().display(),
+        icon.display()
     );
     let _ = fs::write(path, entry);
 }

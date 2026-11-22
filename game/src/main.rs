@@ -9,6 +9,7 @@ mod ops;
 mod osm;
 mod planner;
 mod render;
+mod save;
 mod settings;
 mod sidebar;
 mod staffui;
@@ -74,6 +75,43 @@ pub struct BusLine {
     pub depot_len: f32,
     pub income: f64,
     pub cost: f64,
+    /// How the line was planned (stops and waypoints), so it can be rebuilt when loading a save.
+    pub recipe: Vec<save::SavedWp>,
+}
+
+/// Builds a line from planned items: route along roads plus the legs to and from the depot.
+pub fn build_line(
+    map: &MapData,
+    depot: &DepotSite,
+    items: &[(petgraph::graph::NodeIndex, Option<usize>)],
+    name: String,
+    color: Color,
+    timetable: Timetable,
+    recipe: Vec<save::SavedWp>,
+) -> Option<BusLine> {
+    let route = map.route_through(items)?;
+    if route.path.len() < 2 {
+        return None;
+    }
+    let first = items.first()?.0;
+    let depot_leg = map.leg(depot.node, first);
+    let home_leg = map.leg(first, depot.node);
+    let depot_len = depot_leg
+        .as_ref()
+        .map(|p| p.windows(2).map(|w| w[0].distance(w[1])).sum())
+        .unwrap_or(0.0);
+    Some(BusLine {
+        name,
+        route: Arc::new(route),
+        color,
+        timetable,
+        depot_leg,
+        home_leg,
+        depot_len,
+        income: 0.0,
+        cost: 0.0,
+        recipe,
+    })
 }
 
 #[derive(Resource, Default)]
@@ -208,6 +246,10 @@ fn main() {
     .init_resource::<planner::DraftMeta>()
     .init_resource::<ui::LinesOpen>()
     .init_resource::<sidebar::Missions>()
+    .init_resource::<save::PendingLoad>()
+    .init_resource::<save::SaveRequest>()
+    .init_resource::<save::AutosaveDay>()
+    .init_resource::<save::Pause>()
     .init_resource::<staffui::StaffView>()
     .init_resource::<staffui::TimetableUi>()
     .init_resource::<Economy>()
@@ -253,7 +295,7 @@ fn main() {
         update::UpdatePlugin,
         company::CompanyPlugin,
     ))
-    .add_systems(Startup, render::configure_gizmos)
+    .add_systems(Startup, (render::configure_gizmos, set_window_icon))
     .add_systems(
         Update,
         (
@@ -270,6 +312,8 @@ fn main() {
         OnEnter(AppState::Playing),
         (
             init_game,
+            save::apply_pending_load,
+            save::reset_autosave,
             render::spawn_areas,
             render::spawn_roads,
             render::spawn_stops,
@@ -291,11 +335,15 @@ fn main() {
         depot::menu_backdrop_camera.run_if(in_state(AppState::Menu)),
     )
     .add_systems(OnExit(AppState::Menu), depot::menu_backdrop_exit)
-    .add_systems(OnExit(AppState::Playing), cleanup_game)
+    .add_systems(
+        OnExit(AppState::Playing),
+        (save::save_on_exit, save::close_pause, cleanup_game).chain(),
+    )
     .add_systems(
         Update,
         (
             depot::apply_view,
+            (save::pause_system, save::save_system, save::sandbox_money),
             (sidebar::update_minimap, sidebar::update_missions),
             (
                 camera_controls,
@@ -359,6 +407,7 @@ fn main() {
 
 fn init_game(
     mut commands: Commands,
+    session: Res<save::Session>,
     map: Res<MapData>,
     catalog: Res<Catalog>,
     window: Single<&Window, With<PrimaryWindow>>,
@@ -367,7 +416,10 @@ fn init_game(
     commands.insert_resource(StopQueues {
         waiting: vec![0.0; map.stops.len()],
     });
-    commands.insert_resource(Economy::default());
+    commands.insert_resource(Economy {
+        money: session.mode.start_money(),
+        ..default()
+    });
     commands.insert_resource(Lines::default());
     commands.insert_resource(Draft::default());
     commands.insert_resource(Tool::Idle);
@@ -452,6 +504,17 @@ fn init_game(
         o.scale = o.scale.clamp(0.3, 300.0);
         // Start zoomed in a bit for big cities so the map is readable.
         o.scale = o.scale.min(40.0);
+    }
+}
+
+/// Gives the window (taskbar / title bar / alt-tab) the Bus Manager icon.
+fn set_window_icon(windows: NonSend<bevy::winit::WinitWindows>) {
+    let rgba = include_bytes!("../assets/icon_64.rgba").to_vec();
+    let Ok(icon) = winit::window::Icon::from_rgba(rgba, 64, 64) else {
+        return;
+    };
+    for w in windows.windows.values() {
+        w.set_window_icon(Some(icon.clone()));
     }
 }
 
@@ -633,7 +696,6 @@ fn game_actions(
     mut lines: ResMut<Lines>,
     mut fleet: ResMut<Fleet>,
     mut eco: ResMut<Economy>,
-    mut next: ResMut<NextState<AppState>>,
     mut buses: Query<&mut Bus>,
 ) {
     for UiAction(action) in events.read() {
@@ -663,35 +725,31 @@ fn game_actions(
                     continue;
                 }
                 let items = draft.items(&map);
-                match map.route_through(&items) {
-                    Some(route) if route.path.len() >= 2 => {
-                        let idx = lines.0.len();
-                        let first = items[0].0;
-                        let depot_leg = map.leg(depot.node, first);
-                        let home_leg = map.leg(first, depot.node);
-                        let depot_len = depot_leg
-                            .as_ref()
-                            .map(|p| p.windows(2).map(|w| w[0].distance(w[1])).sum())
-                            .unwrap_or(0.0);
-                        let mut timetable = Timetable::default();
-                        if let Some(iv) = meta.interval {
-                            timetable.interval = iv.clamp(5, 60);
-                        }
-                        let name = meta
-                            .name
-                            .take()
-                            .unwrap_or_else(|| format!("Line {}", idx + 1));
-                        lines.0.push(BusLine {
-                            name: name.clone(),
-                            route: Arc::new(route),
-                            color: palette(idx),
-                            timetable,
-                            depot_leg,
-                            home_leg,
-                            depot_len,
-                            income: 0.0,
-                            cost: 0.0,
-                        });
+                let idx = lines.0.len();
+                let mut timetable = Timetable::default();
+                if let Some(iv) = meta.interval {
+                    timetable.interval = iv.clamp(5, 60);
+                }
+                let name = meta
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Line {}", idx + 1));
+                let recipe: Vec<_> = draft
+                    .0
+                    .iter()
+                    .map(|w| save::SavedWp::from_wp(&map, w))
+                    .collect();
+                match build_line(
+                    &map,
+                    &depot,
+                    &items,
+                    name.clone(),
+                    palette(idx),
+                    timetable,
+                    recipe,
+                ) {
+                    Some(line) => {
+                        lines.0.push(line);
                         // Start the line with up to two buses from the depot.
                         let mut sent = 0;
                         for _ in 0..2 {
@@ -715,7 +773,7 @@ fn game_actions(
                         *meta = planner::DraftMeta::default();
                         *tool = Tool::Idle;
                     }
-                    _ => eco.say(
+                    None => eco.say(
                         &real,
                         "No road connects these stops (one-way streets or separate road networks)",
                     ),
@@ -772,9 +830,6 @@ fn game_actions(
             Action::Speed(n) => {
                 vtime.unpause();
                 vtime.set_relative_speed(n as f32);
-            }
-            Action::Menu => {
-                next.set(AppState::Menu);
             }
             _ => {}
         }

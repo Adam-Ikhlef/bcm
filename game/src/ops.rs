@@ -56,7 +56,7 @@ pub fn demand_factor(minute_of_day: u32) -> f32 {
 // --- Timetables ------------------------------------------------------------------------------------
 
 /// A line runs every `interval` minutes from `first` to `last` (minutes after midnight).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Timetable {
     pub first: u32,
     pub last: u32,
@@ -105,7 +105,7 @@ impl Timetable {
 
 // --- Drivers --------------------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Shift {
     Early,
     Late,
@@ -150,7 +150,7 @@ impl Shift {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Driver {
     pub id: u32,
     pub name: String,
