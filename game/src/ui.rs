@@ -94,6 +94,12 @@ pub enum Action {
     UiScaleStep(i32),
     ToggleLines,
     OpenLink(u8),
+    StaffSub(u8),
+    StaffPage(i32),
+    CompanyField(u8),
+    LogoPick(u8),
+    LogoLoad,
+    CompanyNext,
     UpdateDownload,
     UpdateLater,
     ToggleUpdateCheck,
@@ -300,6 +306,10 @@ pub struct LinesList;
 #[derive(Component)]
 pub struct IdleTools;
 #[derive(Component)]
+pub struct DrawSquares;
+#[derive(Component)]
+pub struct DrawHint;
+#[derive(Component)]
 pub struct DrawTools;
 #[derive(Component)]
 pub struct DrawText;
@@ -335,6 +345,8 @@ pub struct NavIcons {
     pub staff: Handle<Image>,
     pub lines: Handle<Image>,
     pub menu: Handle<Image>,
+    pub check: Handle<Image>,
+    pub cross: Handle<Image>,
 }
 
 pub fn install_nav_icons(world: &mut World) {
@@ -361,6 +373,8 @@ pub fn install_nav_icons(world: &mut World) {
         staff: load(include_bytes!("../assets/icons/staff.png")),
         lines: load(include_bytes!("../assets/icons/lines.png")),
         menu: load(include_bytes!("../assets/icons/menu.png")),
+        check: load(include_bytes!("../assets/icons/check.png")),
+        cross: load(include_bytes!("../assets/icons/cross.png")),
     };
     world.insert_resource(icons);
 }
@@ -436,49 +450,54 @@ pub fn lines_panel_visibility(
     }
 }
 
-pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<NavIcons>) {
+pub fn spawn_game_ui(
+    mut commands: Commands,
+    fonts: Res<UiFonts>,
+    icons: Res<NavIcons>,
+    company: Res<crate::company::Company>,
+    logos: Res<crate::company::LogoIcons>,
+) {
     let f = &*fonts;
 
     // Bottom-left card: money, clock, speed, key numbers (like the reference game's HUD)
-    commands.spawn((
-        GameUi,
-        Interaction::default(),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(14.0),
-            bottom: Val::Px(14.0),
-            width: Val::Px(300.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            padding: UiRect::all(Val::Px(10.0)),
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(style::PANEL),
-        BorderColor(style::PANEL_BORDER),
-        BorderRadius::all(Val::Px(14.0)),
-        children![
-            (
-                Node {
-                    justify_content: JustifyContent::Center,
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(style::INPUT),
-                BorderColor(style::CBM_BLUE),
-                BorderRadius::all(Val::Px(8.0)),
-                children![(StatText(Stat::Money), text(f, true, 28.0, style::TEXT, "-"))],
-            ),
-            (
-                Node {
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                children![
-                    (StatText(Stat::Clock), text(f, true, 14.0, style::TEXT, "-")),
-                    (
+    let hud = commands
+        .spawn((
+            GameUi,
+            Interaction::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(14.0),
+                bottom: Val::Px(14.0),
+                width: Val::Px(300.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(style::PANEL),
+            BorderColor(style::PANEL_BORDER),
+            BorderRadius::all(Val::Px(14.0)),
+            children![
+                (
+                    Node {
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(style::INPUT),
+                    BorderColor(style::CBM_BLUE),
+                    BorderRadius::all(Val::Px(8.0)),
+                    children![(StatText(Stat::Money), text(f, true, 28.0, style::TEXT, "-"))],
+                ),
+                (
+                    Node {
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    children![(
                         Node {
                             column_gap: Val::Px(5.0),
                             ..default()
@@ -489,23 +508,45 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<Nav
                             button(f, "4x", Action::Speed(4), BtnKind::Toggle),
                             button(f, "10x", Action::Speed(10), BtnKind::Toggle),
                         ]
-                    ),
-                ]
-            ),
-            (
-                Node {
-                    justify_content: JustifyContent::SpaceBetween,
-                    ..default()
-                },
-                children![
-                    stat(f, "PROFIT", Stat::Profit),
-                    stat(f, "RIDERS", Stat::Riders),
-                    stat(f, "WAITING", Stat::Waiting),
-                    stat(f, "BUSES", Stat::Buses),
-                ]
-            ),
-        ],
-    ));
+                    ),]
+                ),
+                (
+                    Node {
+                        justify_content: JustifyContent::SpaceBetween,
+                        ..default()
+                    },
+                    children![
+                        stat(f, "PROFIT", Stat::Profit),
+                        stat(f, "RIDERS", Stat::Riders),
+                        stat(f, "WAITING", Stat::Waiting),
+                        stat(f, "BUSES", Stat::Buses),
+                    ]
+                ),
+            ],
+        ))
+        .id();
+    let name_row = commands
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            padding: UiRect::horizontal(Val::Px(2.0)),
+            ..default()
+        })
+        .with_children(|r| {
+            crate::company::spawn_logo(r, &company, &logos, 34.0);
+            r.spawn(text(f, true, 17.0, style::TEXT, company.name.clone()));
+            r.spawn(Node {
+                flex_grow: 1.0,
+                ..default()
+            });
+            r.spawn((
+                StatText(Stat::Clock),
+                text(f, false, 13.0, style::MUTED, "-"),
+                TextLayout::new_with_no_wrap(),
+            ));
+        })
+        .id();
+    commands.entity(hud).insert_children(0, &[name_row]);
 
     // Coloured square toolbar next to it
     commands
@@ -543,36 +584,124 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<Nav
             nav_button(p, &icons.menu, style::CBM_RED, Action::Menu);
         });
 
+    // Right column: minimap, lines, missions
+    let column = commands
+        .spawn((
+            GameUi,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(14.0),
+                right: Val::Px(14.0),
+                width: Val::Px(330.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(10.0),
+                ..default()
+            },
+        ))
+        .with_children(crate::sidebar::spawn_minimap)
+        .id();
     // Lines panel
+    let lines_panel = commands
+        .spawn((
+            LinesPanel,
+            Interaction::default(),
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(14.0)),
+                row_gap: Val::Px(10.0),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(style::PANEL),
+            BorderColor(style::PANEL_BORDER),
+            BorderRadius::all(Val::Px(14.0)),
+            children![
+                text(f, true, 16.0, style::TEXT, "Lines"),
+                (
+                    LinesList,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    }
+                ),
+            ],
+        ))
+        .id();
+    commands.entity(column).add_child(lines_panel);
+    commands
+        .entity(column)
+        .with_children(|c| crate::sidebar::spawn_missions(c, f));
+
+    // Confirm / cancel squares (only while planning a line)
+    commands
+        .spawn((
+            GameUi,
+            DrawSquares,
+            Interaction::default(),
+            Node {
+                display: Display::None,
+                position_type: PositionType::Absolute,
+                left: Val::Px(622.0),
+                bottom: Val::Px(14.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                column_gap: Val::Px(8.0),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(style::PANEL),
+            BorderColor(style::PANEL_BORDER),
+            BorderRadius::all(Val::Px(12.0)),
+        ))
+        .with_children(|p| {
+            nav_button(p, &icons.check, style::CBM_GREEN, Action::Finish);
+            nav_button(p, &icons.cross, style::CBM_RED, Action::Cancel);
+        });
+
+    // Hint while planning (top centre)
     commands.spawn((
         GameUi,
-        LinesPanel,
-        Interaction::default(),
+        DrawHint,
         Node {
+            display: Display::None,
             position_type: PositionType::Absolute,
             top: Val::Px(14.0),
-            right: Val::Px(14.0),
-            width: Val::Px(330.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(14.0)),
-            row_gap: Val::Px(10.0),
-            border: UiRect::all(Val::Px(1.0)),
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            justify_content: JustifyContent::Center,
             ..default()
         },
-        BackgroundColor(style::PANEL),
-        BorderColor(style::PANEL_BORDER),
-        BorderRadius::all(Val::Px(14.0)),
-        children![
-            text(f, true, 16.0, style::TEXT, "Lines"),
-            (
-                LinesList,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                }
-            ),
-        ],
+        children![(
+            Node {
+                padding: UiRect::axes(Val::Px(14.0), Val::Px(9.0)),
+                column_gap: Val::Px(10.0),
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(style::PANEL),
+            BorderColor(style::PANEL_BORDER),
+            BorderRadius::all(Val::Px(10.0)),
+            children![
+                (
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BorderColor(style::MUTED),
+                    BorderRadius::all(Val::Px(5.0)),
+                    children![text(f, true, 12.0, style::TEXT, "Click")]
+                ),
+                text(
+                    f,
+                    false,
+                    14.0,
+                    style::TEXT,
+                    "a stop to add it  ·  a road to place a waypoint"
+                ),
+            ]
+        )],
     ));
 
     // Bottom toolbar
@@ -627,8 +756,13 @@ pub fn spawn_game_ui(mut commands: Commands, fonts: Res<UiFonts>, icons: Res<Nav
                     },
                     children![
                         (DrawText, text(f, true, 14.0, style::TEXT, "")),
-                        button(f, "Finish line  (Enter)", Action::Finish, BtnKind::Primary),
-                        button(f, "Cancel  (Esc)", Action::Cancel, BtnKind::Normal),
+                        text(
+                            f,
+                            false,
+                            13.0,
+                            style::MUTED,
+                            "Enter = finish · Esc = cancel"
+                        ),
                     ]
                 ),
             ]
@@ -830,8 +964,26 @@ pub fn update_toolbar(
     mut idle: Single<&mut Node, (With<IdleTools>, Without<DrawTools>)>,
     mut draw: Single<&mut Node, (With<DrawTools>, Without<IdleTools>)>,
     mut label: Single<&mut Text, With<DrawText>>,
+    mut extras: Query<
+        &mut Node,
+        (
+            Or<(With<DrawSquares>, With<DrawHint>)>,
+            Without<IdleTools>,
+            Without<DrawTools>,
+        ),
+    >,
 ) {
     let drawing = *tool == Tool::Drawing;
+    for mut n in &mut extras {
+        let want = if drawing {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if n.display != want {
+            n.display = want;
+        }
+    }
     let (i, d) = if drawing {
         (Display::None, Display::Flex)
     } else {

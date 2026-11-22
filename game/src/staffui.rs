@@ -15,6 +15,15 @@ use crate::{
 #[derive(Resource, Default)]
 pub struct TimetableUi(pub Option<usize>);
 
+/// Which list the staff screen shows and on which page.
+#[derive(Resource, Default)]
+pub struct StaffView {
+    pub team: bool,
+    pub page: usize,
+}
+
+const PER_PAGE: usize = 4;
+
 #[derive(Component)]
 pub struct StaffPanel;
 #[derive(Component)]
@@ -48,11 +57,11 @@ pub fn spawn_staff_ui(mut commands: Commands) {
         StaffPanel,
         Interaction::default(),
         panel_node(
-            76.0,
-            Val::Px(crate::ui::SIDEBAR_W + 24.0),
-            Val::Px(24.0),
+            14.0,
+            Val::Px(330.0),
             Val::Auto,
-            Val::Px(24.0),
+            Val::Px(600.0),
+            Val::Px(82.0),
         ),
         BackgroundColor(style::PANEL),
         BorderColor(style::PANEL_BORDER),
@@ -72,13 +81,7 @@ pub fn spawn_staff_ui(mut commands: Commands) {
         MapUi,
         TimetablePanel,
         Interaction::default(),
-        panel_node(
-            76.0,
-            Val::Px(crate::ui::SIDEBAR_W + 14.0),
-            Val::Auto,
-            Val::Px(340.0),
-            Val::Auto,
-        ),
+        panel_node(14.0, Val::Px(14.0), Val::Auto, Val::Px(340.0), Val::Auto),
         BackgroundColor(style::PANEL),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(14.0)),
@@ -104,9 +107,17 @@ pub fn staff_actions(
     tool: Res<Tool>,
     mut eco: ResMut<Economy>,
     real: Res<Time<Real>>,
+    mut sv: ResMut<StaffView>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
+            Action::StaffSub(t) => {
+                sv.team = t == 1;
+                sv.page = 0;
+            }
+            Action::StaffPage(d) => {
+                sv.page = (sv.page as i32 + d).max(0) as usize;
+            }
             Action::Hire(id) => match staff.hire(id) {
                 Some(name) => eco.say(&real, format!("{name} hired · paid daily at midnight")),
                 None => {}
@@ -143,58 +154,157 @@ pub fn staff_actions(
 
 // --- Rendering of the panels ---------------------------------------------------------------------------
 
-fn stars(skill: u8) -> String {
-    format!("Skill {skill}/5")
+fn level_name(skill: u8) -> &'static str {
+    match skill {
+        1 => "Trainee",
+        2 => "Novice",
+        3 => "Regular",
+        4 => "Experienced",
+        _ => "Expert",
+    }
 }
 
-fn driver_row(
+fn initials(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphabetic())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
+}
+
+fn bar(p: &mut ChildSpawnerCommands, f: &UiFonts, label: &str, frac: f32, color: Color) {
+    p.spawn(Node {
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(8.0),
+        ..default()
+    })
+    .with_children(|r| {
+        r.spawn((
+            Node {
+                width: Val::Px(78.0),
+                justify_content: JustifyContent::FlexEnd,
+                ..default()
+            },
+            children![text(f, false, 12.0, style::MUTED, label.to_string())],
+        ));
+        r.spawn((
+            Node {
+                width: Val::Px(90.0),
+                height: Val::Px(12.0),
+                ..default()
+            },
+            BackgroundColor(style::WHITE),
+            BorderRadius::all(Val::Px(6.0)),
+        ))
+        .with_children(|b| {
+            b.spawn((
+                Node {
+                    width: Val::Percent((frac * 100.0).clamp(0.0, 100.0)),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                BackgroundColor(color),
+                BorderRadius::all(Val::Px(6.0)),
+            ));
+        });
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn driver_card(
+    p: &mut ChildSpawnerCommands,
     f: &UiFonts,
     d: &Driver,
-    status: String,
-    status_color: Color,
+    status: Option<(String, Color)>,
     action: Action,
     label: &str,
-) -> impl Bundle {
-    (
+) {
+    const AVATARS: [Color; 6] = [
+        style::CBM_BLUE,
+        style::CBM_GREEN,
+        style::CBM_ORANGE,
+        style::CBM_PURPLE,
+        style::CBM_RED,
+        style::rgb(0x1f, 0x9e, 0x9e),
+    ];
+    p.spawn((
         Node {
             align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            padding: UiRect::axes(Val::Px(10.0), Val::Px(7.0)),
+            column_gap: Val::Px(14.0),
+            padding: UiRect::all(Val::Px(10.0)),
             border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
         BackgroundColor(style::BTN),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(10.0)),
-        children![
-            (
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    ..default()
-                },
-                children![
-                    text(f, true, 14.0, style::TEXT, d.name.clone()),
-                    text(
-                        f,
-                        false,
-                        12.0,
-                        style::MUTED,
-                        format!(
-                            "{} · {} · {}/day",
-                            stars(d.skill),
-                            d.shift.label(),
-                            fmt_money(d.wage)
-                        )
-                    ),
-                    text(f, false, 12.0, status_color, status),
-                ]
-            ),
-            button(f, label.to_string(), action, BtnKind::Small),
-        ],
-    )
+    ))
+    .with_children(|c| {
+        c.spawn((
+            Node {
+                width: Val::Px(54.0),
+                height: Val::Px(54.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(AVATARS[d.id as usize % AVATARS.len()]),
+            BorderColor(style::WHITE),
+            BorderRadius::all(Val::Px(10.0)),
+            children![text(f, true, 21.0, style::WHITE, initials(&d.name))],
+        ));
+        c.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            width: Val::Px(140.0),
+            ..default()
+        })
+        .with_children(|n| {
+            n.spawn(text(f, true, 16.0, style::TEXT, "Bus driver"));
+            n.spawn(text(f, false, 14.0, style::TEXT, d.name.clone()));
+            n.spawn(text(f, true, 15.0, style::TEXT, level_name(d.skill)));
+        });
+        c.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(6.0),
+            width: Val::Px(140.0),
+            ..default()
+        })
+        .with_children(|m| {
+            m.spawn(text(
+                f,
+                true,
+                14.0,
+                style::TEXT,
+                format!("Wage: {} / day", fmt_money(d.wage)),
+            ));
+            m.spawn(text(f, false, 12.0, style::MUTED, d.shift.label()));
+            m.spawn(button(f, label.to_string(), action, BtnKind::Primary));
+        });
+        c.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            flex_grow: 1.0,
+            ..default()
+        })
+        .with_children(|b| {
+            bar(b, f, "Skill", d.skill as f32 / 5.0, style::CBM_GREEN);
+            bar(
+                b,
+                f,
+                "Fuel saving",
+                ((1.10 - d.efficiency()) / 0.20 + 0.5).clamp(0.0, 1.0),
+                style::CBM_BLUE,
+            );
+            if let Some((s, col)) = status {
+                b.spawn(text(f, false, 12.0, col, s));
+            }
+        });
+    });
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn rebuild_staff(
     mut commands: Commands,
     fonts: Res<UiFonts>,
@@ -203,9 +313,10 @@ pub fn rebuild_staff(
     fleet: Res<Fleet>,
     trips: Res<Trips>,
     clock: Res<GameClock>,
+    sv: Res<StaffView>,
     body: Single<Entity, With<StaffBody>>,
     mut panel: Single<&mut Node, (With<StaffPanel>, Without<StaffBody>)>,
-    mut last: Local<Option<(u32, u32, u32, bool, u32)>>,
+    mut last: Local<Option<(u32, u32, u32, bool, u32, usize)>>,
 ) {
     let want = if *view == View::Staff {
         Display::Flex
@@ -223,8 +334,9 @@ pub fn rebuild_staff(
         staff.version,
         fleet.version,
         trips.version,
-        true,
+        sv.team,
         clock.minute_of_day() / 10,
+        sv.page,
     );
     if *last == Some(key) {
         return;
@@ -233,72 +345,142 @@ pub fn rebuild_staff(
 
     let f = &*fonts;
     let minute = clock.minute_of_day();
+    let list: Vec<&Driver> = if sv.team {
+        staff.drivers.iter().collect()
+    } else {
+        staff.candidates.iter().collect()
+    };
+    let pages = list.len().div_ceil(PER_PAGE).max(1);
+    let page = sv.page.min(pages - 1);
     commands.entity(*body).despawn_related::<Children>();
     commands.entity(*body).with_children(|p| {
-        // Header
+        // Tabs like the reference game: only drivers exist so far
+        p.spawn(Node {
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|t| {
+            t.spawn(button(
+                f,
+                "Bus drivers",
+                Action::StaffSub(0),
+                BtnKind::Toggle,
+            ));
+            for name in ["Mechanics", "Researchers", "Cleaners", "Service staff"] {
+                t.spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(style::BTN_DISABLED),
+                    BorderRadius::all(Val::Px(8.0)),
+                    children![text(f, true, 13.0, style::MUTED, name)],
+                ));
+            }
+        });
         p.spawn((
-            Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Baseline, ..default() },
+            Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            },
             children![
-                text(f, true, 22.0, style::TEXT, "Staff"),
+                (
+                    Node {
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                    children![
+                        button(f, "Hire", Action::StaffSub(0), BtnKind::Small),
+                        button(
+                            f,
+                            format!("Your team ({})", staff.drivers.len()),
+                            Action::StaffSub(1),
+                            BtnKind::Small
+                        ),
+                    ]
+                ),
                 text(
                     f,
                     false,
                     13.0,
                     style::MUTED,
                     format!(
-                        "Payroll {}/day · {} drivers · trips served {} · missed {}",
+                        "Payroll {}/day · trips served {} · missed {}",
                         fmt_money(staff.daily_wages()),
-                        staff.drivers.len(),
                         trips.served_total,
                         trips.missed_total
                     )
                 ),
             ],
         ));
-        // Shift coverage
-        p.spawn(Node { column_gap: Val::Px(16.0), ..default() }).with_children(|r| {
+        p.spawn(Node {
+            column_gap: Val::Px(16.0),
+            ..default()
+        })
+        .with_children(|r| {
             for s in Shift::ALL {
                 let n = staff.drivers.iter().filter(|d| d.shift == s).count();
                 let color = if n == 0 { style::DANGER } else { style::ACCENT };
-                r.spawn(text(f, true, 13.0, color, format!("{}: {} driver{}", s.label(), n, if n == 1 { "" } else { "s" })));
+                r.spawn(text(
+                    f,
+                    true,
+                    13.0,
+                    color,
+                    format!(
+                        "{}: {} driver{}",
+                        s.label(),
+                        n,
+                        if n == 1 { "" } else { "s" }
+                    ),
+                ));
             }
         });
-
-        p.spawn(Node { column_gap: Val::Px(20.0), flex_grow: 1.0, ..default() }).with_children(|cols| {
-            // Drivers
-            cols.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), flex_basis: Val::Px(0.0), flex_grow: 1.0, ..default() })
-                .with_children(|c| {
-                    c.spawn(text(f, true, 12.0, style::MUTED, "YOUR DRIVERS"));
-                    if staff.drivers.is_empty() {
-                        c.spawn(text(f, false, 13.0, style::MUTED, "No drivers. Hire someone from the list on the right."));
+        if list.is_empty() {
+            p.spawn(text(
+                f,
+                false,
+                14.0,
+                style::MUTED,
+                if sv.team {
+                    "No drivers yet. Open the Hire list."
+                } else {
+                    "Everyone available today has been hired. New candidates arrive every morning."
+                },
+            ));
+        }
+        for d in list.iter().skip(page * PER_PAGE).take(PER_PAGE) {
+            if sv.team {
+                let st = match d.bus.and_then(|b| fleet.get(b)) {
+                    Some(b) => (format!("Driving {}", b.plate), style::ACCENT),
+                    None if d.shift.contains(minute) => {
+                        ("On shift · waiting".to_string(), style::TEXT)
                     }
-                    for d in staff.drivers.iter().take(9) {
-                        let (status, color) = match d.bus.and_then(|b| fleet.get(b)) {
-                            Some(b) => (format!("Driving {}", b.plate), style::ACCENT),
-                            None if d.shift.contains(minute) => ("On shift · waiting for a trip".to_string(), style::TEXT),
-                            None => ("Off shift".to_string(), style::MUTED),
-                        };
-                        c.spawn(driver_row(f, d, status, color, Action::Fire(d.id), "Fire"));
-                    }
-                });
-            // Candidates
-            cols.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(8.0), flex_basis: Val::Px(0.0), flex_grow: 1.0, ..default() })
-                .with_children(|c| {
-                    c.spawn(text(f, true, 12.0, style::MUTED, "CANDIDATES · new ones arrive every morning"));
-                    if staff.candidates.is_empty() {
-                        c.spawn(text(f, false, 13.0, style::MUTED, "Everyone available today has been hired."));
-                    }
-                    for d in staff.candidates.iter().take(9) {
-                        c.spawn(driver_row(f, d, "Available to start today".to_string(), style::MUTED, Action::Hire(d.id), "Hire"));
-                    }
-                });
-        });
-        p.spawn(text(
-            f,
-            false,
-            12.0,
-            style::MUTED,
-            "A bus leaves the depot shortly before each timetable departure and needs a driver whose shift covers it. Better drivers use less fuel and wear buses less.",
+                    None => ("Off shift".to_string(), style::MUTED),
+                };
+                driver_card(p, f, d, Some(st), Action::Fire(d.id), "Fire");
+            } else {
+                driver_card(p, f, d, None, Action::Hire(d.id), "Hire");
+            }
+        }
+        p.spawn((
+            Node {
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                ..default()
+            },
+            children![
+                button(f, "‹", Action::StaffPage(-1), BtnKind::Small),
+                text(
+                    f,
+                    true,
+                    14.0,
+                    style::TEXT,
+                    format!("{} / {}", page + 1, pages)
+                ),
+                button(f, "›", Action::StaffPage(1), BtnKind::Small),
+            ],
         ));
     });
 }

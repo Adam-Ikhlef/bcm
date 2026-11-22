@@ -32,14 +32,15 @@ enum Mode {
 pub enum Screen {
     #[default]
     Main,
+    Company,
     NewGame,
     Options,
     Credits,
 }
 
 #[derive(Resource, Default)]
-struct Menu {
-    screen: Screen,
+pub(crate) struct Menu {
+    pub(crate) screen: Screen,
     query: String,
     mode: Mode,
     results: Vec<Place>,
@@ -106,7 +107,7 @@ fn spawn_menu(mut commands: Commands, mut menu: ResMut<Menu>) {
             height: Val::Percent(100.0),
             ..default()
         },
-        BackgroundColor(style::BG),
+        BackgroundColor(Color::srgba(0.03, 0.05, 0.08, 0.58)),
         // Above the world cameras: the menu covers the whole window.
         GlobalZIndex(50),
         children![(
@@ -124,6 +125,7 @@ fn spawn_menu(mut commands: Commands, mut menu: ResMut<Menu>) {
 fn menu_screens(
     mut commands: Commands,
     fonts: Res<UiFonts>,
+    icons: Res<crate::company::LogoIcons>,
     mut menu: ResMut<Menu>,
     settings: Res<Settings>,
     content: Single<Entity, With<MenuContent>>,
@@ -143,6 +145,7 @@ fn menu_screens(
         .entity(content)
         .with_children(|root| match menu.screen {
             Screen::Main => main_screen(root, f),
+            Screen::Company => crate::company::company_screen(root, f, &icons),
             Screen::NewGame => new_game_screen(root, f),
             Screen::Options => options_screen(root, f, &settings),
             Screen::Credits => credits_screen(root, f),
@@ -197,227 +200,7 @@ fn link_button(p: &mut ChildSpawnerCommands, f: &UiFonts, label: &str, action: A
     p.spawn(button(f, label.to_string(), action, BtnKind::Small));
 }
 
-/// Simple original artwork: a night street with a bus, built from UI rectangles.
-fn illustration(p: &mut ChildSpawnerCommands, f: &UiFonts) {
-    let abs = |l: f32, b: f32, w: f32, h: f32| Node {
-        position_type: PositionType::Absolute,
-        left: Val::Percent(l),
-        bottom: Val::Percent(b),
-        width: Val::Px(w),
-        height: Val::Px(h),
-        ..default()
-    };
-    p.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        BackgroundColor(Color::srgb(0.07, 0.11, 0.18)),
-    ))
-    .with_children(|s| {
-        // Skyline
-        let colors = [
-            Color::srgb(0.09, 0.14, 0.23),
-            Color::srgb(0.11, 0.17, 0.28),
-            Color::srgb(0.08, 0.12, 0.2),
-        ];
-        let heights = [
-            240.0, 330.0, 200.0, 380.0, 260.0, 310.0, 180.0, 350.0, 230.0, 290.0,
-        ];
-        for (i, h) in heights.iter().enumerate() {
-            let left = i as f32 * 10.5 - 2.0;
-            s.spawn((abs(left, 17.0, 96.0, *h), BackgroundColor(colors[i % 3])))
-                .with_children(|b| {
-                    // Lit windows
-                    for row in 0..(*h as i32 / 34) {
-                        for col in 0..3 {
-                            if (i as i32 * 7 + row * 5 + col * 3) % 4 == 0 {
-                                b.spawn((
-                                    Node {
-                                        position_type: PositionType::Absolute,
-                                        left: Val::Px(12.0 + col as f32 * 28.0),
-                                        bottom: Val::Px(14.0 + row as f32 * 34.0),
-                                        width: Val::Px(14.0),
-                                        height: Val::Px(18.0),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgba(1.0, 0.78, 0.35, 0.8)),
-                                ));
-                            }
-                        }
-                    }
-                });
-        }
-        // Road
-        s.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                height: Val::Percent(17.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.05, 0.07, 0.11)),
-        ))
-        .with_children(|r| {
-            for i in 0..9 {
-                r.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Percent(i as f32 * 12.0 + 2.0),
-                        top: Val::Percent(46.0),
-                        width: Val::Px(54.0),
-                        height: Val::Px(5.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.85, 0.82, 0.65)),
-                ));
-            }
-        });
-        // Bus stop sign with the green H on yellow
-        s.spawn((
-            abs(74.0, 17.5, 8.0, 190.0),
-            BackgroundColor(Color::srgb(0.35, 0.38, 0.42)),
-        ));
-        s.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(72.5),
-                bottom: Val::Px(230.0),
-                width: Val::Px(70.0),
-                height: Val::Px(70.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(1.0, 0.85, 0.0)),
-            BorderColor(Color::srgb(0.1, 0.5, 0.2)),
-            BorderRadius::all(Val::Percent(50.0)),
-            children![text(f, true, 40.0, Color::srgb(0.05, 0.4, 0.15), "H")],
-        ));
-        // Bus
-        s.spawn((
-            abs(16.0, 15.5, 420.0, 118.0),
-            BackgroundColor(Color::srgb(1.0, 0.71, 0.13)),
-            BorderRadius::all(Val::Px(18.0)),
-        ))
-        .with_children(|b| {
-            // Window band
-            b.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(14.0),
-                    right: Val::Px(14.0),
-                    top: Val::Px(16.0),
-                    height: Val::Px(46.0),
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                },
-                children![
-                    (
-                        Node {
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.12, 0.2, 0.3)),
-                        BorderRadius::all(Val::Px(6.0))
-                    ),
-                    (
-                        Node {
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.12, 0.2, 0.3)),
-                        BorderRadius::all(Val::Px(6.0))
-                    ),
-                    (
-                        Node {
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.12, 0.2, 0.3)),
-                        BorderRadius::all(Val::Px(6.0))
-                    ),
-                    (
-                        Node {
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.12, 0.2, 0.3)),
-                        BorderRadius::all(Val::Px(6.0))
-                    ),
-                    (
-                        Node {
-                            flex_grow: 1.2,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.16, 0.26, 0.38)),
-                        BorderRadius::all(Val::Px(6.0))
-                    ),
-                ],
-            ));
-            // Destination sign
-            b.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: Val::Px(22.0),
-                    bottom: Val::Px(30.0),
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(3.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.05, 0.08, 0.12)),
-                BorderRadius::all(Val::Px(4.0)),
-                children![text(
-                    f,
-                    true,
-                    14.0,
-                    Color::srgb(1.0, 0.7, 0.1),
-                    "1  CITY CENTRE"
-                )],
-            ));
-            // Headlight
-            b.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    right: Val::Px(2.0),
-                    bottom: Val::Px(14.0),
-                    width: Val::Px(12.0),
-                    height: Val::Px(14.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(1.0, 0.97, 0.8)),
-                BorderRadius::all(Val::Px(4.0)),
-            ));
-            // Wheels
-            for left in [64.0, 300.0] {
-                b.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(left),
-                        bottom: Val::Px(-16.0),
-                        width: Val::Px(42.0),
-                        height: Val::Px(42.0),
-                        border: UiRect::all(Val::Px(8.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.6, 0.62, 0.66)),
-                    BorderColor(Color::srgb(0.08, 0.08, 0.1)),
-                    BorderRadius::all(Val::Percent(50.0)),
-                ));
-            }
-        });
-    });
-}
-
 fn main_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
-    illustration(root, f);
     root.spawn((Node {
         position_type: PositionType::Absolute,
         left: Val::Px(0.0),
@@ -455,7 +238,7 @@ fn main_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
                 c,
                 f,
                 "New Game",
-                Some(Action::MenuGo(Screen::NewGame)),
+                Some(Action::MenuGo(Screen::Company)),
                 style::CBM_GREEN,
             );
             spawn_menu_button(
@@ -517,11 +300,12 @@ fn main_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
 }
 
 /// A centered panel with a title and a Back button, used by the sub screens.
-fn panel_screen(
+pub(crate) fn panel_screen(
     root: &mut ChildSpawnerCommands,
     f: &UiFonts,
     title: &str,
     width: f32,
+    back: Screen,
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     root.spawn(Node {
@@ -541,7 +325,7 @@ fn panel_screen(
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
             },
-            BackgroundColor(style::PANEL),
+            BackgroundColor(style::PANEL_SOLID),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(18.0)),
         ))
@@ -554,14 +338,14 @@ fn panel_screen(
                 },
                 children![text(f, true, 30.0, style::TEXT, title.to_string())],
             ))
-            .with_children(|r| link_button(r, f, "‹ Back", Action::MenuGo(Screen::Main)));
+            .with_children(|r| link_button(r, f, "‹ Back", Action::MenuGo(back)));
             body(p);
         });
     });
 }
 
 fn new_game_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
-    panel_screen(root, f, "New Game", 640.0, |p| {
+    panel_screen(root, f, "Choose a city", 640.0, Screen::Company, |p| {
         p.spawn(text(
             f,
             false,
@@ -650,7 +434,7 @@ fn option_row(
 }
 
 fn options_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, s: &Settings) {
-    panel_screen(root, f, "Options", 560.0, |p| {
+    panel_screen(root, f, "Options", 560.0, Screen::Main, |p| {
         option_row(p, f, "Fullscreen", "Borderless fullscreen window", |c| {
             c.spawn(button(
                 f,
@@ -722,7 +506,7 @@ fn options_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, s: &Settings) {
 }
 
 fn credits_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
-    panel_screen(root, f, "Credits", 640.0, |p| {
+    panel_screen(root, f, "Credits", 640.0, Screen::Main, |p| {
         let rows: [(&str, &str); 7] = [
             ("Created by", "Adam (YOZ Team)"),
             (
@@ -812,7 +596,7 @@ fn menu_input(mut events: EventReader<KeyboardInput>, mut menu: ResMut<Menu>, in
             continue;
         }
         if menu.mode != Mode::Choosing && ev.logical_key == Key::Escape {
-            menu.screen = Screen::Main;
+            menu.screen = Screen::Company;
             continue;
         }
 

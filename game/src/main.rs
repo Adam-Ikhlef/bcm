@@ -1,4 +1,5 @@
 mod busmodel;
+mod company;
 mod depot;
 mod dispatch;
 mod fleet;
@@ -9,6 +10,7 @@ mod osm;
 mod planner;
 mod render;
 mod settings;
+mod sidebar;
 mod staffui;
 mod style;
 mod ui;
@@ -205,6 +207,8 @@ fn main() {
     .init_resource::<planner::Search>()
     .init_resource::<planner::DraftMeta>()
     .init_resource::<ui::LinesOpen>()
+    .init_resource::<sidebar::Missions>()
+    .init_resource::<staffui::StaffView>()
     .init_resource::<staffui::TimetableUi>()
     .init_resource::<Economy>()
     .init_resource::<StopQueues>()
@@ -244,98 +248,113 @@ fn main() {
         }
     }
 
-    app.add_plugins((menu::MenuPlugin, update::UpdatePlugin))
-        .add_systems(Startup, render::configure_gizmos)
-        .add_systems(
-            Update,
-            (
-                ui::button_visuals,
-                ui::emit_actions,
-                ui::track_ui_block,
-                settings::apply_settings,
-                ui::ui_toggles,
-                ui::lines_panel_visibility,
-            )
-                .chain(),
+    app.add_plugins((
+        menu::MenuPlugin,
+        update::UpdatePlugin,
+        company::CompanyPlugin,
+    ))
+    .add_systems(Startup, render::configure_gizmos)
+    .add_systems(
+        Update,
+        (
+            ui::button_visuals,
+            ui::emit_actions,
+            ui::track_ui_block,
+            settings::apply_settings,
+            ui::ui_toggles,
+            ui::lines_panel_visibility,
         )
-        .add_systems(
-            OnEnter(AppState::Playing),
-            (
-                init_game,
-                render::spawn_areas,
-                render::spawn_roads,
-                render::spawn_stops,
-                depot::spawn_depot_scene,
-                ui::spawn_game_ui,
-                planner::spawn_planner_ui,
-                depot::spawn_depot_ui,
-                staffui::spawn_staff_ui,
-            )
-                .chain(),
+            .chain(),
+    )
+    .add_systems(
+        OnEnter(AppState::Playing),
+        (
+            init_game,
+            render::spawn_areas,
+            render::spawn_roads,
+            render::spawn_stops,
+            depot::spawn_depot_scene,
+            ui::spawn_game_ui,
+            planner::spawn_planner_ui,
+            depot::spawn_depot_ui,
+            staffui::spawn_staff_ui,
+            sidebar::build_minimap,
         )
-        .add_systems(OnExit(AppState::Playing), cleanup_game)
-        .add_systems(
-            Update,
+            .chain(),
+    )
+    .add_systems(
+        OnEnter(AppState::Menu),
+        (depot::spawn_depot_scene, depot::menu_backdrop_buses).chain(),
+    )
+    .add_systems(
+        Update,
+        depot::menu_backdrop_camera.run_if(in_state(AppState::Menu)),
+    )
+    .add_systems(OnExit(AppState::Menu), depot::menu_backdrop_exit)
+    .add_systems(OnExit(AppState::Playing), cleanup_game)
+    .add_systems(
+        Update,
+        (
+            depot::apply_view,
+            (sidebar::update_minimap, sidebar::update_missions),
             (
-                depot::apply_view,
-                (
-                    camera_controls,
-                    update_hover,
-                    planner::plan_click,
-                    planner::update_preview,
-                    planner::draw_planner,
-                    planner::rebuild_planner,
-                    render::update_roads,
-                    render::update_buildings,
-                    render::update_stop_icons,
-                    render::update_bus_scale,
-                    render::draw_routes,
-                    ui::update_toolbar,
-                    ui::update_tooltip,
-                )
-                    .chain()
-                    .run_if(depot::in_map_view),
-                (
-                    depot::depot_camera,
-                    depot::update_depot_hover,
-                    depot::depot_pick,
-                    depot::sync_depot_buses,
-                    depot::animate_departures,
-                    depot::sync_cards,
-                    depot::update_cards,
-                    depot::update_selection_marker,
-                    depot::rebuild_panel,
-                )
-                    .chain()
-                    .run_if(depot::in_depot_view),
-                game_actions,
-                depot::depot_actions,
-                hotkeys,
-                planner::planner_actions,
-                planner::search_input,
-                planner::planner_background,
-                (
-                    dispatch::tick_clock,
-                    dispatch::daily_rollover,
-                    dispatch::dispatch_trips,
-                    dispatch::advance_departures,
-                    dispatch::layover_manager,
-                    spawn_passengers,
-                    move_buses,
-                )
-                    .chain(),
-                ui::update_stats,
-                ui::update_lines_panel,
-                staffui::staff_actions,
-                staffui::rebuild_staff,
-                staffui::rebuild_timetable,
-                ui::update_toast,
+                camera_controls,
+                update_hover,
+                planner::plan_click,
+                planner::update_preview,
+                planner::draw_planner,
+                planner::rebuild_planner,
+                render::update_roads,
+                render::update_buildings,
+                render::update_stop_icons,
+                render::update_bus_scale,
+                render::draw_routes,
+                ui::update_toolbar,
+                ui::update_tooltip,
             )
                 .chain()
-                .after(ui::track_ui_block)
-                .run_if(in_state(AppState::Playing)),
+                .run_if(depot::in_map_view),
+            (
+                depot::depot_camera,
+                depot::update_depot_hover,
+                depot::depot_pick,
+                depot::sync_depot_buses,
+                depot::animate_departures,
+                depot::sync_cards,
+                depot::update_cards,
+                depot::update_selection_marker,
+                depot::rebuild_panel,
+            )
+                .chain()
+                .run_if(depot::in_depot_view),
+            game_actions,
+            depot::depot_actions,
+            hotkeys,
+            planner::planner_actions,
+            planner::search_input,
+            planner::planner_background,
+            (
+                dispatch::tick_clock,
+                dispatch::daily_rollover,
+                dispatch::dispatch_trips,
+                dispatch::advance_departures,
+                dispatch::layover_manager,
+                spawn_passengers,
+                move_buses,
+            )
+                .chain(),
+            ui::update_stats,
+            ui::update_lines_panel,
+            staffui::staff_actions,
+            staffui::rebuild_staff,
+            staffui::rebuild_timetable,
+            ui::update_toast,
         )
-        .run();
+            .chain()
+            .after(ui::track_ui_block)
+            .run_if(in_state(AppState::Playing)),
+    )
+    .run();
 }
 
 fn init_game(
@@ -443,7 +462,9 @@ fn cleanup_game(
     buses: Query<Entity, With<Bus>>,
     mut vtime: ResMut<Time<Virtual>>,
     mut view: ResMut<View>,
+    mut missions: ResMut<sidebar::Missions>,
 ) {
+    *missions = default();
     for e in world.iter().chain(gui.iter()).chain(buses.iter()) {
         commands.entity(e).despawn();
     }

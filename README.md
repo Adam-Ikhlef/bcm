@@ -122,6 +122,14 @@ under "Real routes (OSM)" (search by number or name); picking one fills the stop
 before pressing Finish. Cities downloaded with older versions keep working but have no real routes until
 they are downloaded again (delete the city's cache file in the BusManager `cache` folder).
 
+## New game, company and HUD
+
+**New Game** first asks for your **company name** and **logo** (one of six built-in logos, or your own PNG/JPG
+by typing its file path). They are saved and shown in the HUD; later they will be used for customer reviews,
+social media and contracts. Then you pick the city. The HUD has the money/clock card (bottom left), coloured
+buttons for Map, Depot, Staff, Lines and Menu, and on the right a **minimap** (click it to move the camera),
+the Lines list and **Missions** that pay cash rewards.
+
 ## Updates
 
 On every launch the game checks the GitHub Releases of this repository in the background. If a newer

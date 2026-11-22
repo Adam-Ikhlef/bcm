@@ -1504,3 +1504,70 @@ pub fn animate_departures(fleet: Res<Fleet>, mut q: Query<(&DepotBus, &mut Trans
         tf.rotation = tf.rotation.slerp(target, 0.12);
     }
 }
+
+// --- Main-menu backdrop -------------------------------------------------------------------
+
+/// Shows the 3D depot (with a few parked buses) behind the main menu.
+pub fn menu_backdrop_buses(
+    mut commands: Commands,
+    catalog: Res<Catalog>,
+    assets: Res<BusAssets>,
+    asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut map_cam: Query<&mut Camera, (With<MapCamera>, Without<DepotCamera>)>,
+    mut depot_cam: Query<&mut Camera, (With<DepotCamera>, Without<MapCamera>)>,
+) {
+    for mut c in &mut map_cam {
+        c.is_active = false;
+    }
+    for mut c in &mut depot_cam {
+        c.is_active = true;
+    }
+    for (n, bay) in [0usize, 1, 2, 4, 5, 8, 9, 10, 12, 13]
+        .into_iter()
+        .enumerate()
+    {
+        if catalog.0.is_empty() {
+            break;
+        }
+        let spec = &catalog.0[(n * 3) % catalog.0.len()];
+        let e = busmodel::spawn_bus_visual(
+            &mut commands,
+            &assets,
+            &asset_server,
+            &mut materials,
+            spec,
+            spec.color,
+            Transform::from_translation(bay_pos(bay)),
+        );
+        commands.entity(e).insert(GameWorld);
+    }
+}
+
+/// Slowly drifts the camera over the depot while the menu is open.
+pub fn menu_backdrop_camera(
+    time: Res<Time<Real>>,
+    cam: Single<(&mut Transform, &mut Projection), With<DepotCamera>>,
+) {
+    let t = time.elapsed_secs();
+    let rot = cam_rot();
+    let target = Vec3::new(
+        -4.0 + (t * 0.06).sin() * 9.0,
+        0.0,
+        -8.0 + (t * 0.045).cos() * 5.0,
+    );
+    let (mut tf, mut proj) = cam.into_inner();
+    tf.rotation = rot;
+    tf.translation = target + rot * Vec3::Z * 200.0;
+    if let Projection::Orthographic(o) = &mut *proj {
+        o.scaling_mode = ScalingMode::FixedVertical {
+            viewport_height: 46.0,
+        };
+    }
+}
+
+pub fn menu_backdrop_exit(mut commands: Commands, q: Query<Entity, With<GameWorld>>) {
+    for e in &q {
+        commands.entity(e).despawn();
+    }
+}

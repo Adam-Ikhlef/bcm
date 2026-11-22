@@ -12,7 +12,6 @@ pub const MAP_BG: Color = rgb(0xcd, 0xeb, 0xb0); // OSM park/grass green
 pub const PLAN_BG: Color = rgb(0x9c, 0xd0, 0x80); // deeper green while planning a route
 
 // UI (dark theme: deep navy panels, bright green accent, amber highlights)
-pub const BG: Color = rgb(0x0b, 0x10, 0x18);
 pub const PANEL: Color = Color::srgba(0.19, 0.225, 0.26, 0.96);
 pub const PANEL_BORDER: Color = rgb(0x4d, 0x5b, 0x6c);
 pub const TEXT: Color = rgb(0xe8, 0xed, 0xf3);
