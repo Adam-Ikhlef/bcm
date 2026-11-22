@@ -529,6 +529,20 @@ fn options_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, s: &Settings) {
                 ));
             },
         );
+        option_row(
+            p,
+            f,
+            "Discord Rich Presence",
+            "Show in your Discord profile that you are playing Bus Manager",
+            |c| {
+                c.spawn(button(
+                    f,
+                    if s.discord_presence { "On" } else { "Off" },
+                    Action::ToggleDiscord,
+                    BtnKind::Small,
+                ));
+            },
+        );
         p.spawn(text(
             f,
             false,
@@ -752,6 +766,10 @@ fn menu_actions(
             }
             Action::ToggleUpdateCheck => {
                 settings.check_updates = !settings.check_updates;
+                settings.save();
+            }
+            Action::ToggleDiscord => {
+                settings.discord_presence = !settings.discord_presence;
                 settings.save();
             }
             Action::UiScaleStep(d) => {
@@ -999,7 +1017,12 @@ fn menu_render(
                         ..default()
                     })
                     .with_child(place_row(f, place, Action::Cached(i), false));
-                    row.spawn(button(f, "Update map", Action::UpdateMap(i as u8), BtnKind::Small));
+                    row.spawn(button(
+                        f,
+                        "Update map",
+                        Action::UpdateMap(i as u8),
+                        BtnKind::Small,
+                    ));
                 });
             }
         }

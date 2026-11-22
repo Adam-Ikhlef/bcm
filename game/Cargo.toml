@@ -24,6 +24,8 @@ dirs = "6"
 earcutr = "0.4"
 # Window icon
 winit = "0.30"
+# Discord Rich Presence (talks to the local Discord client; silently does nothing if Discord is closed)
+discord-rich-presence = "1"
 
 [build-dependencies]
 winresource = "0.1"

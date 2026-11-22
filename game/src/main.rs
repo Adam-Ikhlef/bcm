@@ -9,6 +9,7 @@ mod net;
 mod ops;
 mod osm;
 mod planner;
+mod presence;
 mod render;
 mod save;
 mod settings;
@@ -296,6 +297,7 @@ fn main() {
     app.add_plugins((
         menu::MenuPlugin,
         update::UpdatePlugin,
+        presence::PresencePlugin,
         company::CompanyPlugin,
     ))
     .add_systems(Startup, (render::configure_gizmos, set_window_icon))

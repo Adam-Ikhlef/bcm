@@ -15,6 +15,8 @@ pub struct Settings {
     pub ui_scale: f32,
     /// Look for a newer release on every launch.
     pub check_updates: bool,
+    /// Show what the player is doing in their Discord profile.
+    pub discord_presence: bool,
     pub company_name: String,
     /// "d0".."d5" or the path of the player's own logo image.
     pub company_logo: String,
@@ -27,6 +29,7 @@ impl Default for Settings {
             vsync: true,
             ui_scale: 1.0,
             check_updates: true,
+            discord_presence: true,
             company_name: String::new(),
             company_logo: String::new(),
         }

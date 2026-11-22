@@ -177,4 +177,6 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
 - [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
 - [x] Update checker with changelog
+- [ ] In-game updater: download the new version, install it and restart the game
+- [x] Discord Rich Presence (toggle in Options)
 - [x] Save/load, game modes (Casual / Realistic / Sandbox)

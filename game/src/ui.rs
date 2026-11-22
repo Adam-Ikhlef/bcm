@@ -110,6 +110,7 @@ pub enum Action {
     UpdateDownload,
     UpdateLater,
     ToggleUpdateCheck,
+    ToggleDiscord,
     /// Opens (or closes) a depot panel: 0 = bus shop, 1 = build.
     OpenPanel(u8),
     /// Build tool: 0 none, 1 place stands, 2 remove stands.
@@ -364,8 +365,6 @@ pub struct NavIcons {
     pub menu: Handle<Image>,
     pub check: Handle<Image>,
     pub cross: Handle<Image>,
-    /// Wide "Bus Manager" logo of the main menu.
-    pub logo: Handle<Image>,
     /// Same logo with a dark outline, for the transparent main-menu title.
     pub menu_logo: Handle<Image>,
 }
@@ -398,7 +397,6 @@ pub fn install_nav_icons(world: &mut World) {
         menu: load(include_bytes!("../assets/icons/menu.png")),
         check: load(include_bytes!("../assets/icons/check.png")),
         cross: load(include_bytes!("../assets/icons/cross.png")),
-        logo: load(include_bytes!("../assets/logo.png")),
         menu_logo: load(include_bytes!("../assets/logo_menu.png")),
     };
     world.insert_resource(icons);

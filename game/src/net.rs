@@ -177,9 +177,11 @@ pub fn refresh_city(place: &Place) -> Result<(), String> {
     let v3 = cache_dir().join(format!("city_{}_v3.json", place.osm_id));
     let fresh = cache_dir().join(format!("city_{}_v3.json.new", place.osm_id));
     fetch(place, &fresh)?;
-    let check = File::open(&fresh)
-        .map_err(|e| e.to_string())
-        .and_then(|f| osm::load_overpass(BufReader::new(f)).map(|_| ()).map_err(|e| e.to_string()));
+    let check = File::open(&fresh).map_err(|e| e.to_string()).and_then(|f| {
+        osm::load_overpass(BufReader::new(f))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    });
     if let Err(e) = check {
         let _ = fs::remove_file(&fresh);
         return Err(format!("could not use downloaded data: {e}"));

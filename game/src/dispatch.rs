@@ -81,9 +81,18 @@ pub fn daily_rollover(
         return;
     }
     clock.last_day = day;
-    let break_room = if fleet.has_room(crate::fleet::Room::BreakRoom) { 0.95 } else { 1.0 };
+    let break_room = if fleet.has_room(crate::fleet::Room::BreakRoom) {
+        0.95
+    } else {
+        1.0
+    };
     let wages = staff.daily_wages() * session.mode.wage_factor() * break_room;
-    let upkeep = fleet.upkeep() * if session.mode.wage_factor() > 0.0 { 1.0 } else { 0.0 };
+    let upkeep = fleet.upkeep()
+        * if session.mode.wage_factor() > 0.0 {
+            1.0
+        } else {
+            0.0
+        };
     eco.money -= wages + upkeep;
     eco.costs += wages + upkeep;
     staff.refresh_candidates(day);

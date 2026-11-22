@@ -28,7 +28,12 @@ pub enum Room {
 }
 
 impl Room {
-    pub const ALL: [Room; 4] = [Room::Workshop, Room::WashBay, Room::FuelStation, Room::BreakRoom];
+    pub const ALL: [Room; 4] = [
+        Room::Workshop,
+        Room::WashBay,
+        Room::FuelStation,
+        Room::BreakRoom,
+    ];
 
     pub fn index(self) -> usize {
         self as usize
@@ -395,9 +400,21 @@ impl FleetBus {
 
     /// Price of a full service; rooms make parts of it cheaper.
     pub fn service_cost(&self, fleet: &Fleet) -> f64 {
-        let fuel = if fleet.has_room(Room::FuelStation) { 0.6 } else { 1.0 };
-        let repair = if fleet.has_room(Room::Workshop) { 0.5 } else { 1.0 };
-        let wash = if fleet.has_room(Room::WashBay) { 0.3 } else { 1.0 };
+        let fuel = if fleet.has_room(Room::FuelStation) {
+            0.6
+        } else {
+            1.0
+        };
+        let repair = if fleet.has_room(Room::Workshop) {
+            0.5
+        } else {
+            1.0
+        };
+        let wash = if fleet.has_room(Room::WashBay) {
+            0.3
+        } else {
+            1.0
+        };
         ((100.0 - self.fuel) * 0.5 * fuel
             + (100.0 - self.condition) * 2.0 * repair
             + (100.0 - self.clean) * 0.3 * wash) as f64
@@ -440,7 +457,11 @@ impl Fleet {
 
     /// Daily cost of all rooms.
     pub fn upkeep(&self) -> f64 {
-        Room::ALL.iter().filter(|r| self.has_room(**r)).map(|r| r.upkeep()).sum()
+        Room::ALL
+            .iter()
+            .filter(|r| self.has_room(**r))
+            .map(|r| r.upkeep())
+            .sum()
     }
 
     /// Builds a stand (the caller handles the money). Fails on locked, taken or invalid slots.
