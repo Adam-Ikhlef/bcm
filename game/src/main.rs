@@ -3,6 +3,7 @@ mod company;
 mod depot;
 mod dispatch;
 mod fleet;
+mod lot;
 mod menu;
 mod net;
 mod ops;
@@ -38,7 +39,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // --- Economy tuning ---------------------------------------------------------
 const START_MONEY: f64 = 18_000.0;
-const START_BUSES: usize = 3;
 pub const BUS_SPEED: f32 = 11.0; // m/s
 const FARE: f64 = 1.5;
 const DWELL_SECONDS: f32 = 3.0;
@@ -261,6 +261,9 @@ fn main() {
     .init_resource::<View>()
     .init_resource::<depot::Selected>()
     .init_resource::<depot::ShopTab>()
+    .init_resource::<lot::DepotPanel>()
+    .init_resource::<lot::BuildTool>()
+    .init_resource::<lot::BuildHover>()
     .init_resource::<depot::DepotHover>()
     .init_resource::<depot::DepotView>()
     .init_resource::<render::RoadLayers>()
@@ -328,7 +331,12 @@ fn main() {
     )
     .add_systems(
         OnEnter(AppState::Menu),
-        (depot::spawn_depot_scene, depot::menu_backdrop_buses).chain(),
+        (
+            depot::spawn_depot_scene,
+            depot::menu_backdrop_buses,
+            lot::menu_lot,
+        )
+            .chain(),
     )
     .add_systems(
         Update,
@@ -371,12 +379,14 @@ fn main() {
                 depot::sync_cards,
                 depot::update_cards,
                 depot::update_selection_marker,
+                lot::build_input,
+                lot::sync_lot,
                 depot::rebuild_panel,
             )
                 .chain()
                 .run_if(depot::in_depot_view),
             game_actions,
-            depot::depot_actions,
+            (depot::depot_actions, lot::lot_actions).chain(),
             hotkeys,
             planner::planner_actions,
             planner::search_input,
@@ -426,6 +436,8 @@ fn init_game(
     commands.insert_resource(Hover::default());
     commands.insert_resource(View::Map);
     commands.insert_resource(depot::Selected::default());
+    commands.insert_resource(lot::DepotPanel::default());
+    commands.insert_resource(lot::BuildTool::default());
     commands.insert_resource(depot::DepotHover::default());
     // Developer/test option: BUSMANAGER_CLOCK=05:50 starts the game at that time.
     let mut clock = GameClock::default();
@@ -474,16 +486,8 @@ fn init_game(
     staff.refresh_candidates(0);
     commands.insert_resource(staff);
 
-    // Starting fleet: a few standard city buses (the first catalog entry).
-    let mut fleet = Fleet::default();
-    let start_spec = catalog
-        .0
-        .iter()
-        .position(|s| s.name == "City Bus 12 m")
-        .unwrap_or(0);
-    for _ in 0..START_BUSES {
-        fleet.add(start_spec);
-    }
+    // A new company owns no stands and no buses: the player builds stands, then buys buses.
+    let fleet = Fleet::default();
     debug_assert!(!catalog.0.is_empty());
     commands.insert_resource(fleet);
 

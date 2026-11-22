@@ -298,7 +298,17 @@ struct Mission {
     reward: f64,
 }
 
-const MISSIONS: [Mission; 8] = [
+const MISSIONS: [Mission; 10] = [
+    Mission {
+        title: "Build 2 parking stands",
+        target: 2.0,
+        reward: 500.0,
+    },
+    Mission {
+        title: "Buy your first bus",
+        target: 1.0,
+        reward: 500.0,
+    },
     Mission {
         title: "Open your first line",
         target: 1.0,
@@ -353,12 +363,15 @@ fn progress(
     eco: &Economy,
     staff: &Staff,
     trips: &Trips,
+    fleet: &crate::fleet::Fleet,
 ) -> f64 {
     match i {
-        0 | 5 => lines.0.len() as f64,
-        1 => buses as f64,
-        2 | 6 => eco.boarded as f64,
-        3 => staff.drivers.len() as f64,
+        0 => fleet.stand_count() as f64,
+        1 => fleet.buses.len() as f64,
+        2 | 7 => lines.0.len() as f64,
+        3 => buses as f64,
+        4 | 8 => eco.boarded as f64,
+        5 => staff.drivers.len() as f64,
         _ => trips.served_total as f64,
     }
 }
@@ -448,6 +461,7 @@ pub fn update_missions(
     lines: Res<Lines>,
     staff: Res<Staff>,
     trips: Res<Trips>,
+    fleet: Res<crate::fleet::Fleet>,
     buses: Query<(), With<Bus>>,
     mut slots: Query<(&Slot, &mut Node)>,
     mut titles: Query<(&SlotTitle, &mut Text), (Without<SlotReward>, Without<SlotCount>)>,
@@ -459,7 +473,7 @@ pub fn update_missions(
     // pay out finished missions, one at a time (so the toast is readable)
     while missions.done < MISSIONS.len() {
         let m = &MISSIONS[missions.done];
-        if progress(missions.done, &lines, nb, &eco, &staff, &trips) >= m.target {
+        if progress(missions.done, &lines, nb, &eco, &staff, &trips, &fleet) >= m.target {
             eco.money += m.reward;
             eco.say(
                 &real,
@@ -495,13 +509,13 @@ pub fn update_missions(
     }
     for (s, mut t) in &mut counts {
         if let Some(m) = MISSIONS.get(idx(s.0)) {
-            let v = progress(idx(s.0), &lines, nb, &eco, &staff, &trips).min(m.target);
+            let v = progress(idx(s.0), &lines, nb, &eco, &staff, &trips, &fleet).min(m.target);
             t.0 = format!("{} / {}", v as i64, m.target as i64);
         }
     }
     for (s, mut n) in &mut bars {
         if let Some(m) = MISSIONS.get(idx(s.0)) {
-            let v = progress(idx(s.0), &lines, nb, &eco, &staff, &trips) / m.target;
+            let v = progress(idx(s.0), &lines, nb, &eco, &staff, &trips, &fleet) / m.target;
             n.width = Val::Percent((v * 100.0).clamp(0.0, 100.0) as f32);
         }
     }

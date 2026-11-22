@@ -58,6 +58,7 @@ pub(crate) struct Menu {
 enum NetMsg {
     Places(Result<Vec<Place>, String>),
     Map(Result<MapData, String>),
+    Updated(Result<(), String>),
 }
 
 #[derive(Resource, Default)]
@@ -236,19 +237,16 @@ fn main_screen(
                     ..default()
                 },
                 children![(
-                    // the logo is dark green: give it a light plate so it reads on any background
+                    // transparent logo with a dark outline, drawn straight onto the 3D scene
                     Node {
-                        padding: UiRect::axes(Val::Px(26.0), Val::Px(14.0)),
-                        margin: UiRect::bottom(Val::Px(10.0)),
+                        margin: UiRect::bottom(Val::Px(6.0)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.94)),
-                    BorderRadius::all(Val::Px(16.0)),
                     children![(
-                        ImageNode::new(nav.logo.clone()),
+                        ImageNode::new(nav.menu_logo.clone()),
                         Node {
-                            width: Val::Px(440.0),
-                            height: Val::Px(69.5),
+                            width: Val::Px(500.0),
+                            height: Val::Px(111.7),
                             ..default()
                         },
                     )]
@@ -330,6 +328,7 @@ fn main_screen(
         children![
             button(f, "Ko-fi", Action::OpenLink(0), BtnKind::Small),
             button(f, "GitHub", Action::OpenLink(1), BtnKind::Small),
+            button(f, "Discord", Action::OpenLink(2), BtnKind::Small),
         ],
     ));
 }
@@ -424,7 +423,7 @@ fn new_game_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
             false,
             12.0,
             style::MUTED,
-            "Game modes (Casual, Realistic, Sandbox) will be chosen here in a later version.",
+            "You can update the map data of a downloaded city to the latest OpenStreetMap data.",
         ));
     });
 }
@@ -632,6 +631,20 @@ fn start_download(
         "Loading map (first download can take a minute, then it is saved on this computer)".into();
 }
 
+fn start_update(menu: &mut Menu, inbox: &Inbox, place: Place) {
+    if menu.mode == Mode::Busy {
+        return;
+    }
+    let (tx, rx) = channel();
+    *inbox.0.lock().unwrap() = Some(rx);
+    std::thread::spawn(move || {
+        let _ = tx.send(NetMsg::Updated(net::refresh_city(&place)));
+    });
+    menu.mode = Mode::Busy;
+    menu.is_error = false;
+    menu.status = "Downloading the latest map data (this can take a minute)".into();
+}
+
 fn menu_input(mut events: EventReader<KeyboardInput>, mut menu: ResMut<Menu>, inbox: Res<Inbox>) {
     for ev in events.read() {
         if !ev.state.is_pressed() || menu.mode == Mode::Busy {
@@ -782,6 +795,11 @@ fn menu_actions(
                     start_download(&mut menu, &inbox, p, None);
                 }
             }
+            Action::UpdateMap(i) => {
+                if let Some(p) = menu.cached.get(i as usize).cloned() {
+                    start_update(&mut menu, &inbox, p);
+                }
+            }
             _ => {}
         }
     }
@@ -830,6 +848,17 @@ fn menu_poll(
             }
             commands.insert_resource(map);
             next.set(AppState::Playing);
+        }
+        NetMsg::Updated(Ok(())) => {
+            menu.cached = net::cached_cities();
+            menu.mode = Mode::Typing;
+            menu.is_error = false;
+            menu.status = "Map data updated to the latest OpenStreetMap data".into();
+        }
+        NetMsg::Updated(Err(e)) => {
+            menu.mode = Mode::Typing;
+            menu.is_error = true;
+            menu.status = format!("Update failed: {e}");
         }
         NetMsg::Map(Err(e)) => {
             menu.mode = if menu.results.is_empty() {
@@ -958,7 +987,20 @@ fn menu_render(
                 "DOWNLOADED CITIES (play offline)",
             ));
             for (i, place) in menu.cached.iter().enumerate() {
-                p.spawn(place_row(f, place, Action::Cached(i), false));
+                p.spawn(Node {
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Stretch,
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn(Node {
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    })
+                    .with_child(place_row(f, place, Action::Cached(i), false));
+                    row.spawn(button(f, "Update map", Action::UpdateMap(i as u8), BtnKind::Small));
+                });
             }
         }
     });

@@ -22,9 +22,10 @@ use crate::{
 const DEFAULT_URL: &str = "https://api.github.com/repos/YOZTeam/BusManager/releases?per_page=10";
 
 /// Links shown on the main menu (indexes used by `Action::OpenLink`).
-pub const LINKS: [&str; 2] = [
+pub const LINKS: [&str; 3] = [
     "https://ko-fi.com/adamikhlef",
     "https://github.com/YOZTeam/BusManager",
+    "https://discord.gg/Ppx7u4g2Wt",
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -290,6 +291,7 @@ fn close_modal(mut commands: Commands, modal: Query<Entity, With<UpdateModal>>) 
 pub fn open_url(url: &str) {
     let ok = url.starts_with("https://github.com/")
         || url.starts_with("https://ko-fi.com/")
+        || url.starts_with("https://discord.gg/")
         || url.starts_with("http://127.0.0.1");
     if !ok
         || url

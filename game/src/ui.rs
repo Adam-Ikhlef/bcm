@@ -110,6 +110,14 @@ pub enum Action {
     UpdateDownload,
     UpdateLater,
     ToggleUpdateCheck,
+    /// Opens (or closes) a depot panel: 0 = bus shop, 1 = build.
+    OpenPanel(u8),
+    /// Build tool: 0 none, 1 place stands, 2 remove stands.
+    BuildTool(u8),
+    BuyRoom(u8),
+    ExpandLot,
+    /// Re-download the map data of a cached city (index into the cached list).
+    UpdateMap(u8),
 }
 
 #[derive(Event)]
@@ -349,6 +357,8 @@ pub const SIDEBAR_W: f32 = 0.0;
 pub struct NavIcons {
     pub map: Handle<Image>,
     pub depot: Handle<Image>,
+    pub shop: Handle<Image>,
+    pub build: Handle<Image>,
     pub staff: Handle<Image>,
     pub lines: Handle<Image>,
     pub menu: Handle<Image>,
@@ -356,6 +366,8 @@ pub struct NavIcons {
     pub cross: Handle<Image>,
     /// Wide "Bus Manager" logo of the main menu.
     pub logo: Handle<Image>,
+    /// Same logo with a dark outline, for the transparent main-menu title.
+    pub menu_logo: Handle<Image>,
 }
 
 pub fn install_nav_icons(world: &mut World) {
@@ -379,12 +391,15 @@ pub fn install_nav_icons(world: &mut World) {
     let icons = NavIcons {
         map: load(include_bytes!("../assets/icons/map.png")),
         depot: load(include_bytes!("../assets/icons/depot.png")),
+        shop: load(include_bytes!("../assets/icons/shop.png")),
+        build: load(include_bytes!("../assets/icons/build.png")),
         staff: load(include_bytes!("../assets/icons/staff.png")),
         lines: load(include_bytes!("../assets/icons/lines.png")),
         menu: load(include_bytes!("../assets/icons/menu.png")),
         check: load(include_bytes!("../assets/icons/check.png")),
         cross: load(include_bytes!("../assets/icons/cross.png")),
         logo: load(include_bytes!("../assets/logo.png")),
+        menu_logo: load(include_bytes!("../assets/logo_menu.png")),
     };
     world.insert_resource(icons);
 }
@@ -584,6 +599,8 @@ pub fn spawn_game_ui(
                 style::CBM_GREEN,
                 Action::SetView(View::Depot),
             );
+            nav_button(p, &icons.shop, style::CBM_ORANGE, Action::OpenPanel(0));
+            nav_button(p, &icons.build, style::CBM_BLUE, Action::OpenPanel(1));
             nav_button(
                 p,
                 &icons.staff,
@@ -598,6 +615,7 @@ pub fn spawn_game_ui(
     let column = commands
         .spawn((
             GameUi,
+            crate::depot::MapUi,
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(14.0),
@@ -652,7 +670,7 @@ pub fn spawn_game_ui(
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
-                left: Val::Px(622.0),
+                left: Val::Px(730.0),
                 bottom: Val::Px(14.0),
                 padding: UiRect::all(Val::Px(8.0)),
                 column_gap: Val::Px(8.0),

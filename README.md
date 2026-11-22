@@ -154,14 +154,27 @@ Four categories: Minibus, Solo bus, Double-decker, Articulated (10 built-in buse
 below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.json` fields: `name`,
 `capacity`, `price`, optional `category` (`minibus`/`solo`/`doubledecker`/`articulated`, guessed from size if missing), `length`, `width`, `height`, `rotation_y`, `scale`.
 
+## Depot, stands and rooms
+
+A new company starts with **no stands and no buses**. Use the toolbar at the bottom left:
+
+- **Build** (hammer): place or remove parking stands on your lot, expand the lot (3 levels) and build rooms: workshop (cheaper repairs), wash bay, fuel station, break room. Rooms have a daily upkeep.
+- **Shop** (bus): the fleet shop. It only opens from this button. Every bus needs its own stand.
+- Main menu: **Update map** next to a downloaded city re-downloads the latest OpenStreetMap data.
+
 ## Roadmap
 
 - [x] 3D depot, fleet shop, bus mods
 - [x] Route-planning screen (waypoints, stop search, live length/time)
 - [x] Timetables, shifts, staff, real OSM routes
-- [ ] Depot expansion and rooms, bus stop shelters, passengers' destinations
+- [x] Depot v2: buy and place parking stands, expand the lot, build rooms (workshop, wash bay, fuel station, break room); a new company starts with no stands and no buses
+- [ ] Shop and Build panels only open from the toolbar (done) · bus stop shelters
 - [ ] Real demand from buildings/POIs and passenger destinations
 - [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
 - [ ] Per-line profit graphs, bus upgrades, loans
+- [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
+- [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
+- [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
+- [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
 - [x] Update checker with changelog
 - [x] Save/load, game modes (Casual / Realistic / Sandbox)

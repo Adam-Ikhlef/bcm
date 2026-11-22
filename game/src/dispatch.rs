@@ -74,15 +74,18 @@ pub fn daily_rollover(
     mut trips: ResMut<Trips>,
     real: Res<Time<Real>>,
     session: Res<crate::save::Session>,
+    fleet: Res<crate::fleet::Fleet>,
 ) {
     let day = clock.day();
     if day <= clock.last_day {
         return;
     }
     clock.last_day = day;
-    let wages = staff.daily_wages() * session.mode.wage_factor();
-    eco.money -= wages;
-    eco.costs += wages;
+    let break_room = if fleet.has_room(crate::fleet::Room::BreakRoom) { 0.95 } else { 1.0 };
+    let wages = staff.daily_wages() * session.mode.wage_factor() * break_room;
+    let upkeep = fleet.upkeep() * if session.mode.wage_factor() > 0.0 { 1.0 } else { 0.0 };
+    eco.money -= wages + upkeep;
+    eco.costs += wages + upkeep;
     staff.refresh_candidates(day);
     let cutoff = clock.abs - 2.0 * MIN_PER_DAY;
     trips.done.retain(|(_, d), _| *d as f64 >= cutoff);
@@ -90,10 +93,15 @@ pub fn daily_rollover(
     eco.say(
         &real,
         format!(
-            "Day {}: paid {} to {} drivers · new candidates are waiting",
+            "Day {}: paid {} to {} drivers{} · new candidates are waiting",
             day + 1,
             fmt_money(wages),
-            staff.drivers.len()
+            staff.drivers.len(),
+            if upkeep > 0.0 {
+                format!(" and {} room upkeep", fmt_money(upkeep))
+            } else {
+                String::new()
+            }
         ),
     );
 }

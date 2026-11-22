@@ -169,3 +169,25 @@ pub fn download_city(place: &Place) -> Result<MapData, String> {
         }
     }
 }
+
+/// Downloads fresh OpenStreetMap data for an already downloaded city. The old data stays in place
+/// until the new download has been checked, so a failed update never breaks the city.
+pub fn refresh_city(place: &Place) -> Result<(), String> {
+    fs::create_dir_all(cache_dir()).map_err(|e| e.to_string())?;
+    let v3 = cache_dir().join(format!("city_{}_v3.json", place.osm_id));
+    let fresh = cache_dir().join(format!("city_{}_v3.json.new", place.osm_id));
+    fetch(place, &fresh)?;
+    let check = File::open(&fresh)
+        .map_err(|e| e.to_string())
+        .and_then(|f| osm::load_overpass(BufReader::new(f)).map(|_| ()).map_err(|e| e.to_string()));
+    if let Err(e) = check {
+        let _ = fs::remove_file(&fresh);
+        return Err(format!("could not use downloaded data: {e}"));
+    }
+    fs::rename(&fresh, &v3).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(cache_dir().join(format!("city_{}_v2.json", place.osm_id)));
+    if let Ok(json) = serde_json::to_string(place) {
+        let _ = fs::write(meta_path(place), json);
+    }
+    Ok(())
+}

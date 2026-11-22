@@ -13,7 +13,8 @@ use bevy::{
 
 use crate::{
     busmodel::{self, BusAssets},
-    fleet::{Catalog, Category, Fleet, BAYS},
+    fleet::{Catalog, Category, Fleet},
+    lot::{BuildTool, DepotPanel},
     style,
     ui::{button, fmt_money, text, Action, BtnKind, GameUi, UiAction, UiFonts},
     Economy, GameWorld, UiBlock,
@@ -140,8 +141,8 @@ pub fn apply_view(
 // --- Scene layout ---------------------------------------------------------------
 
 const COLS: usize = 8;
-const BAY_W: f32 = 5.0;
-const BAY_L: f32 = 20.0;
+pub const BAY_W: f32 = 5.0;
+pub const BAY_L: f32 = 20.0;
 const LANE: f32 = 9.0;
 
 /// Path a departing bus drives inside the yard: out of its bay, along an apron, then east off the lot.
@@ -194,8 +195,8 @@ pub struct DepotView {
 impl Default for DepotView {
     fn default() -> Self {
         Self {
-            target: Vec3::new(-6.0, 0.0, -10.0),
-            height: 40.0,
+            target: Vec3::new(-8.0, 0.0, -6.0),
+            height: 66.0,
         }
     }
 }
@@ -233,7 +234,6 @@ pub fn spawn_depot_scene(
 
     let grass = materials.add(solid(style::rgb(0x72, 0xa8, 0x55), 0.95));
     let asphalt = materials.add(solid(style::rgb(0x6f, 0x72, 0x78), 0.9));
-    let line = materials.add(solid(style::rgb(0xf2, 0xf2, 0xee), 0.8));
     let curb = materials.add(solid(style::rgb(0xb9, 0xbb, 0xbf), 0.8));
     let bark = materials.add(solid(style::rgb(0x6b, 0x4a, 0x30), 0.9));
     let pine_a = materials.add(solid(style::rgb(0x2f, 0x6b, 0x3a), 0.9));
@@ -278,26 +278,6 @@ pub fn spawn_depot_scene(
         (-lot_w / 2.0, 0.0, 0.5, lot_d),
     ] {
         place(&cube, &curb, Vec3::new(x, 0.08, z), Vec3::new(sx, 0.3, sz));
-    }
-
-    // Bay markings
-    for row in 0..2 {
-        let z = (row as f32 - 0.5) * (BAY_L + LANE);
-        for i in 0..=COLS {
-            let x = (i as f32 - COLS as f32 / 2.0) * BAY_W;
-            place(
-                &cube,
-                &line,
-                Vec3::new(x, 0.06, z),
-                Vec3::new(0.14, 0.02, BAY_L),
-            );
-        }
-        place(
-            &cube,
-            &line,
-            Vec3::new(0.0, 0.06, z - BAY_L / 2.0),
-            Vec3::new(COLS as f32 * BAY_W, 0.02, 0.14),
-        );
     }
 
     // Garage building behind the lot (orange brick, like a real depot)
@@ -355,7 +335,7 @@ pub fn spawn_depot_scene(
     for (i, z) in [-26.0, -13.0, 0.0, 13.0, 26.0, 38.0].iter().enumerate() {
         let s = 0.9 + (i % 3) as f32 * 0.15;
         tree(ex, *z, s);
-        tree(-ex - 1.5, *z + 4.0, 1.0 + (i % 2) as f32 * 0.2);
+        tree(-ex - 18.0, *z + 4.0, 1.0 + (i % 2) as f32 * 0.2);
     }
     for (x, z) in [
         (ex - 3.0, -8.0),
@@ -1161,7 +1141,7 @@ pub fn spawn_depot_ui(mut commands: Commands) {
             position_type: PositionType::Absolute,
             top: Val::Px(76.0),
             right: Val::Px(14.0),
-            width: Val::Px(310.0),
+            width: Val::Px(352.0),
             flex_direction: FlexDirection::Column,
             padding: UiRect::all(Val::Px(14.0)),
             border: UiRect::all(Val::Px(1.0)),
@@ -1210,11 +1190,20 @@ pub fn rebuild_panel(
     catalog: Res<Catalog>,
     selected: Res<Selected>,
     tab: Res<ShopTab>,
+    panel: Res<DepotPanel>,
+    tool: Res<BuildTool>,
     body: Single<Entity, With<DepotBody>>,
-    mut last: Local<Option<(u32, Option<u32>, bool, Category)>>,
+    mut last: Local<Option<(u32, Option<u32>, bool, Category, DepotPanel, BuildTool)>>,
     view: Res<View>,
 ) {
-    let key = (fleet.version, selected.0, *view == View::Depot, tab.0);
+    let key = (
+        fleet.version,
+        selected.0,
+        *view == View::Depot,
+        tab.0,
+        *panel,
+        *tool,
+    );
     if *last == Some(key) {
         return;
     }
@@ -1239,8 +1228,9 @@ pub fn rebuild_panel(
                     12.0,
                     style::MUTED,
                     format!(
-                        "{} buses · {parked} parked · {BAYS} bays",
-                        fleet.buses.len()
+                        "{} buses · {parked} parked · {} stands",
+                        fleet.buses.len(),
+                        fleet.stand_count()
                     )
                 ),
             ],
@@ -1293,7 +1283,7 @@ pub fn rebuild_panel(
                             children![
                                 button(
                                     f,
-                                    format!("Service  {}", fmt_money(b.service_cost())),
+                                    format!("Service  {}", fmt_money(b.service_cost(&fleet))),
                                     Action::Service(b.id),
                                     BtnKind::Small
                                 ),
@@ -1309,14 +1299,33 @@ pub fn rebuild_panel(
                 ));
             }
             None => {
+                if *panel != DepotPanel::Build && fleet.buses.len() > 0 {
+                    p.spawn(text(
+                        f,
+                        false,
+                        12.0,
+                        style::MUTED,
+                        "Click a bus to see details, service or sell it.",
+                    ));
+                }
+            }
+        }
+
+        if *panel == DepotPanel::Build {
+            crate::lot::build_body(p, f, &fleet, *tool);
+            return;
+        }
+        if *panel != DepotPanel::Shop {
+            if fleet.stand_count() == 0 {
                 p.spawn(text(
                     f,
                     false,
                     12.0,
-                    style::MUTED,
-                    "Click a bus to see details, service or sell it.",
+                    style::TEXT,
+                    "Your depot is empty. Open Build (hammer button) to place parking stands, then open Shop to buy buses.",
                 ));
             }
+            return;
         }
 
         // Shop
@@ -1415,8 +1424,10 @@ pub fn depot_actions(
                 let Some(spec) = catalog.0.get(i) else {
                     continue;
                 };
-                if fleet.buses.len() >= BAYS {
-                    eco.say(&real, "The depot is full: sell a bus first");
+                if fleet.stand_count() == 0 {
+                    eco.say(&real, "Build a parking stand first (Build button)");
+                } else if fleet.buses.len() >= fleet.stand_count() {
+                    eco.say(&real, "No free stand: build another stand or sell a bus");
                 } else if eco.money < spec.price {
                     eco.say(
                         &real,
@@ -1437,7 +1448,7 @@ pub fn depot_actions(
                 if b.line.is_some() || b.depart.is_some() {
                     continue;
                 }
-                let cost = b.service_cost();
+                let cost = b.service_cost(&fleet);
                 if cost < 0.5 {
                     eco.say(&real, "This bus does not need service");
                 } else if eco.money < cost {

@@ -157,6 +157,13 @@ pub struct SaveData {
     lines: Vec<LineSave>,
     buses: Vec<BusSave>,
     fleet_next_id: u32,
+    /// Built stand slots; `None` in saves from before the depot could be built (everything built).
+    #[serde(default)]
+    stands: Option<Vec<bool>>,
+    #[serde(default)]
+    lot_level: u8,
+    #[serde(default)]
+    rooms: Vec<bool>,
     drivers: Vec<Driver>,
     candidates: Vec<Driver>,
     staff_next_id: u32,
@@ -291,6 +298,9 @@ fn collect(world: &World) -> Option<SaveData> {
             })
             .collect(),
         fleet_next_id: fleet.next_id,
+        stands: Some(fleet.stands.to_vec()),
+        lot_level: fleet.lot_level,
+        rooms: fleet.rooms.to_vec(),
         drivers: staff
             .drivers
             .iter()
@@ -370,6 +380,21 @@ pub fn apply_pending_load(world: &mut World) {
     }
 
     let mut fleet = Fleet::default();
+    match &data.stands {
+        Some(st) => {
+            for (i, v) in st.iter().take(crate::fleet::BAYS).enumerate() {
+                fleet.stands[i] = *v;
+            }
+            fleet.lot_level = data.lot_level.min(2);
+            for (i, v) in data.rooms.iter().take(4).enumerate() {
+                fleet.rooms[i] = *v;
+            }
+        }
+        None => {
+            fleet.stands = [true; crate::fleet::BAYS];
+            fleet.lot_level = 2;
+        }
+    }
     for b in &data.buses {
         let spec = catalog.0.iter().position(|s| s.name == b.spec).unwrap_or(0);
         let Some(id) = fleet.add(spec) else { break };
@@ -409,7 +434,8 @@ pub fn apply_pending_load(world: &mut World) {
         t.missed_total = data.missed;
     }
     if let Some(mut m) = world.get_resource_mut::<Missions>() {
-        m.done = data.missions_done;
+        // Saves from before the depot builder have two fewer onboarding missions.
+        m.done = data.missions_done + if data.stands.is_none() { 2 } else { 0 };
     }
 }
 

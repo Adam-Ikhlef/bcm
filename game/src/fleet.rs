@@ -7,8 +7,83 @@ use serde::Deserialize;
 
 use crate::style;
 
-/// Parking bays in the depot (also the maximum fleet size for now).
+/// Largest number of parking stands the lot can ever hold (2 rows x 8 columns).
 pub const BAYS: usize = 16;
+/// Stand columns per row.
+pub const LOT_COLS: usize = 8;
+/// Columns that are usable at each lot level (the rest is still overgrown land).
+pub const LOT_LEVEL_COLS: [usize; 3] = [4, 6, 8];
+/// Price to expand the lot from level 0 -> 1 and 1 -> 2.
+pub const LOT_EXPAND_COST: [f64; 2] = [6_000.0, 12_000.0];
+/// Price of one parking stand and the refund when it is removed.
+pub const STAND_COST: f64 = 400.0;
+
+/// Buildings the player can add to the depot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Room {
+    Workshop,
+    WashBay,
+    FuelStation,
+    BreakRoom,
+}
+
+impl Room {
+    pub const ALL: [Room; 4] = [Room::Workshop, Room::WashBay, Room::FuelStation, Room::BreakRoom];
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn from_index(i: usize) -> Option<Room> {
+        Self::ALL.get(i).copied()
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Room::Workshop => "Workshop",
+            Room::WashBay => "Wash bay",
+            Room::FuelStation => "Fuel station",
+            Room::BreakRoom => "Break room",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Room::Workshop => "Repairs cost 50% less",
+            Room::WashBay => "Cleaning costs 70% less",
+            Room::FuelStation => "Fuel costs 40% less",
+            Room::BreakRoom => "Driver wages 5% lower",
+        }
+    }
+
+    pub fn price(self) -> f64 {
+        match self {
+            Room::Workshop => 8_000.0,
+            Room::WashBay => 3_000.0,
+            Room::FuelStation => 5_000.0,
+            Room::BreakRoom => 2_500.0,
+        }
+    }
+
+    /// Paid every game day while the room exists.
+    pub fn upkeep(self) -> f64 {
+        match self {
+            Room::Workshop => 40.0,
+            Room::WashBay => 15.0,
+            Room::FuelStation => 25.0,
+            Room::BreakRoom => 10.0,
+        }
+    }
+
+    pub fn color(self) -> (u8, u8, u8) {
+        match self {
+            Room::Workshop => (0xd9, 0x8a, 0x2b),
+            Room::WashBay => (0x3a, 0x9a, 0xd9),
+            Room::FuelStation => (0xd9, 0x3a, 0x3a),
+            Room::BreakRoom => (0x6a, 0xb0, 0x40),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Look {
@@ -318,9 +393,14 @@ impl FleetBus {
         self.fuel <= 5.0 || self.condition <= 5.0 || self.clean <= 5.0
     }
 
-    pub fn service_cost(&self) -> f64 {
-        ((100.0 - self.fuel) * 0.5 + (100.0 - self.condition) * 2.0 + (100.0 - self.clean) * 0.3)
-            as f64
+    /// Price of a full service; rooms make parts of it cheaper.
+    pub fn service_cost(&self, fleet: &Fleet) -> f64 {
+        let fuel = if fleet.has_room(Room::FuelStation) { 0.6 } else { 1.0 };
+        let repair = if fleet.has_room(Room::Workshop) { 0.5 } else { 1.0 };
+        let wash = if fleet.has_room(Room::WashBay) { 0.3 } else { 1.0 };
+        ((100.0 - self.fuel) * 0.5 * fuel
+            + (100.0 - self.condition) * 2.0 * repair
+            + (100.0 - self.clean) * 0.3 * wash) as f64
     }
 }
 
@@ -330,6 +410,12 @@ pub struct Fleet {
     pub next_id: u32,
     /// Bumped whenever buses are added/removed/assigned (UI and 3D scene resync on change).
     pub version: u32,
+    /// Which of the `BAYS` parking stands the player has built.
+    pub stands: [bool; BAYS],
+    /// Lot expansion level (0..=2), see `LOT_LEVEL_COLS`.
+    pub lot_level: u8,
+    /// Built rooms, indexed by `Room::index`.
+    pub rooms: [bool; 4],
 }
 
 fn plate_for(id: u32) -> String {
@@ -339,13 +425,55 @@ fn plate_for(id: u32) -> String {
 }
 
 impl Fleet {
+    /// Whether the stand slot lies inside the part of the lot the player owns.
+    pub fn slot_unlocked(&self, bay: usize) -> bool {
+        bay < BAYS && bay % LOT_COLS < LOT_LEVEL_COLS[(self.lot_level as usize).min(2)]
+    }
+
+    pub fn stand_count(&self) -> usize {
+        self.stands.iter().filter(|s| **s).count()
+    }
+
+    pub fn has_room(&self, r: Room) -> bool {
+        self.rooms[r.index()]
+    }
+
+    /// Daily cost of all rooms.
+    pub fn upkeep(&self) -> f64 {
+        Room::ALL.iter().filter(|r| self.has_room(**r)).map(|r| r.upkeep()).sum()
+    }
+
+    /// Builds a stand (the caller handles the money). Fails on locked, taken or invalid slots.
+    pub fn build_stand(&mut self, bay: usize) -> bool {
+        if !self.slot_unlocked(bay) || self.stands[bay] {
+            return false;
+        }
+        self.stands[bay] = true;
+        self.version += 1;
+        true
+    }
+
+    /// Removes an empty stand. Only allowed while every bus would still have a stand.
+    pub fn remove_stand(&mut self, bay: usize) -> bool {
+        if bay >= BAYS || !self.stands[bay] || self.buses.len() >= self.stand_count() {
+            return false;
+        }
+        // The stand that is removed must not hold a bus.
+        if self.buses.iter().any(|b| b.bay == Some(bay)) {
+            return false;
+        }
+        self.stands[bay] = false;
+        self.version += 1;
+        true
+    }
+
     pub fn free_bay(&self) -> Option<usize> {
-        (0..BAYS).find(|b| !self.buses.iter().any(|x| x.bay == Some(*b)))
+        (0..BAYS).find(|b| self.stands[*b] && !self.buses.iter().any(|x| x.bay == Some(*b)))
     }
 
     /// Adds a new bus parked in a free bay.
     pub fn add(&mut self, spec: usize) -> Option<u32> {
-        if self.buses.len() >= BAYS {
+        if self.buses.len() >= self.stand_count() {
             return None;
         }
         let bay = self.free_bay()?;
@@ -431,6 +559,8 @@ mod tests {
     #[test]
     fn fleet_bays_and_service() {
         let mut f = Fleet::default();
+        f.stands = [true; BAYS];
+        f.lot_level = 2;
         let a = f.add(0).unwrap();
         let b = f.add(1).unwrap();
         assert_eq!(f.get(a).unwrap().bay, Some(0));
@@ -448,17 +578,41 @@ mod tests {
 
         f.get_mut(b).unwrap().fuel = 0.0;
         assert!(f.get(b).unwrap().needs_service());
-        assert!((f.get(b).unwrap().service_cost() - 50.0).abs() < 1e-6);
+        assert!((f.get(b).unwrap().service_cost(&f) - 50.0).abs() < 1e-6);
         assert_eq!(f.unassigned_operational(), Some(a));
     }
 
     #[test]
-    fn fleet_is_limited_by_bays() {
+    fn fleet_is_limited_by_stands() {
         let mut f = Fleet::default();
-        for _ in 0..BAYS {
-            assert!(f.add(0).is_some());
-        }
+        // A new company has no stands, so no bus can be parked.
         assert!(f.add(0).is_none());
+        // Slots outside the owned lot cannot be built.
+        assert!(f.build_stand(0));
+        assert!(!f.build_stand(0));
+        assert!(!f.build_stand(5), "column 5 is locked at level 0");
+        f.lot_level = 1;
+        assert!(f.build_stand(5));
+        assert!(f.add(0).is_some());
+        assert!(f.add(0).is_some());
+        assert!(f.add(0).is_none());
+        // Stands with a bus on them cannot be removed.
+        assert!(!f.remove_stand(0));
+        f.buses.pop();
+        assert!(f.remove_stand(5));
+        assert_eq!(f.stand_count(), 1);
+    }
+
+    #[test]
+    fn rooms_discount_service() {
+        let mut f = Fleet::default();
+        f.stands[0] = true;
+        f.add(0).unwrap();
+        f.buses[0].condition = 50.0;
+        let full = f.buses[0].service_cost(&f);
+        f.rooms[Room::Workshop.index()] = true;
+        assert!((f.buses[0].service_cost(&f) - full / 2.0).abs() < 1e-6);
+        assert!(f.upkeep() > 0.0);
     }
 
     #[test]
