@@ -9,6 +9,7 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::prelude::*;
 
 use crate::fleet::{BusSpec, Look, Model};
+use crate::style;
 
 #[derive(Resource)]
 pub struct BusAssets {
@@ -372,6 +373,7 @@ pub fn spawn_bus_visual(
     materials: &mut Assets<StandardMaterial>,
     spec: &BusSpec,
     color: Color,
+    pattern: u8,
     at: Transform,
 ) -> Entity {
     let root = commands.spawn((at, Visibility::default())).id();
@@ -383,9 +385,32 @@ pub fn spawn_bus_visual(
                 ..default()
             });
             let (look, w, h, l) = (*look, spec.width, spec.height, spec.length);
-            commands
-                .entity(root)
-                .with_children(|p| builtin(p, assets, &body, look, w, h, l));
+            let (ar, ag, ab) = crate::fleet::Paint::accent(crate::fleet::Paint::of_color(color));
+            let accent = materials.add(StandardMaterial {
+                base_color: style::rgb(ar, ag, ab),
+                perceptual_roughness: 0.45,
+                ..default()
+            });
+            commands.entity(root).with_children(|p| {
+                builtin(p, assets, &body, look, w, h, l);
+                match pattern {
+                    1 => part(
+                        p,
+                        &assets.cube,
+                        &accent,
+                        Vec3::new(0.0, 0.78, 0.0),
+                        Vec3::new(w + 0.07, 0.22, l - 0.25),
+                    ),
+                    2 => part(
+                        p,
+                        &assets.cube,
+                        &accent,
+                        Vec3::new(0.0, h + 0.05, 0.0),
+                        Vec3::new(w + 0.08, 0.08, l + 0.02),
+                    ),
+                    _ => {}
+                }
+            });
         }
         Model::Gltf {
             asset,

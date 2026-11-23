@@ -1,3 +1,4 @@
+mod bus_menu;
 mod busmodel;
 mod company;
 mod demand;
@@ -268,6 +269,9 @@ fn main() {
     .init_resource::<planner::DraftMeta>()
     .init_resource::<ui::LinesOpen>()
     .init_resource::<ui::MissionsOpen>()
+    .init_resource::<bus_menu::BuyState>()
+    .init_resource::<bus_menu::Market>()
+    .init_resource::<bus_menu::Thumbs>()
     .init_resource::<sidebar::Missions>()
     .init_resource::<save::PendingLoad>()
     .init_resource::<save::SaveRequest>()
@@ -423,6 +427,7 @@ fn main() {
                 site::update_pin,
                 sidebar::sync_mini_depot,
                 site::guard_view,
+                bus_menu::refresh_market,
             ),
             hotkeys,
             planner::planner_actions,

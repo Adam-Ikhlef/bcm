@@ -99,7 +99,7 @@ Hover a stop to see its name and waiting passengers. A red dot on a stop means p
 ## The depot and your fleet
 
 The Depot view shows your parked buses in 3D (16 bays). Click a bus to see its card and side panel
-(Service / Sell); hover cards show fuel, condition and cleanliness. Buy new buses in the fleet shop,
+(Service / Sell); hover cards show fuel, condition and cleanliness. Buy buses in the bus menu,
 then assign them to lines from the map ("+ Bus"). Buses wear out while running and return to the
 depot when they need service. Selling returns 60% of the price. Depot camera: wheel zoom, right/middle drag, WASD.
 
@@ -160,7 +160,7 @@ below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.js
 A new company starts with **no stands and no buses**. Use the toolbar at the bottom left:
 
 - **Build** (hammer): place or remove parking stands on your lot, expand the lot (3 levels) and build rooms: workshop (cheaper repairs), wash bay, fuel station, break room. Rooms have a daily upkeep.
-- **Shop** (bus): the fleet shop. It only opens from this button. Every bus needs its own stand.
+- **Buses**: the bus menu (Owned / New / Second-hand, with a thumbnail of each bus). It only opens from this button. Every bus needs its own stand.
 - Main menu: **Update map** next to a downloaded city re-downloads the latest OpenStreetMap data.
 
 ## Roadmap
@@ -177,8 +177,8 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
 - [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
 - [x] **Hover tooltips**: hovering any icon shows a small text saying what it is
-- [ ] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
-- [ ] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase
+- [x] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
+- [x] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase
 - [ ] Build stands, staff rooms and other depot buildings **anywhere** in the depot (free placement)
 - [ ] **Depot expansion by research** (the starting lot is small)
 - [ ] Fuel station, wash bay and workshop are required for every company (one of the first missions); build **more than one** of each

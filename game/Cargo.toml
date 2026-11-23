@@ -14,14 +14,14 @@ bevy = { version = "0.16", default-features = false, features = [
     "bevy_pbr", "bevy_gltf", "bevy_scene", "png", "jpeg",
 ] }
 osmpbfreader = "0.19"
-petgraph = "0.8"
+petgraph = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Pure-Rust TLS (rustls): no OpenSSL needed on Windows/macOS/Linux
 ureq = "2"
-dirs = "7"
+dirs = "6"
 # Polygon triangulation for buildings, parks and water
-earcutr = "0.5"
+earcutr = "0.4"
 # Window icon
 winit = "0.30"
 # Discord Rich Presence (talks to the local Discord client; silently does nothing if Discord is closed)
