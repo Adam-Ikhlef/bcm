@@ -135,6 +135,9 @@ struct BusSave {
     condition: f32,
     clean: f32,
     assigned: Option<usize>,
+    /// Custom paint: (r, g, b, pattern).
+    #[serde(default)]
+    paint: Option<(u8, u8, u8, u8)>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -298,6 +301,7 @@ fn collect(world: &World) -> Option<SaveData> {
                 condition: b.condition,
                 clean: b.clean,
                 assigned: b.assigned,
+                paint: b.paint.map(|p| (p.rgb.0, p.rgb.1, p.rgb.2, p.pattern)),
             })
             .collect(),
         fleet_next_id: fleet.next_id,
@@ -415,6 +419,10 @@ pub fn apply_pending_load(world: &mut World) {
             fb.fuel = b.fuel;
             fb.condition = b.condition;
             fb.clean = b.clean;
+            fb.paint = b.paint.map(|(r, g, bl, pattern)| crate::fleet::Paint {
+                rgb: (r, g, bl),
+                pattern,
+            });
             fb.assigned = b.assigned.and_then(|a| map_idx.get(a).copied().flatten());
         }
     }

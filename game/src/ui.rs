@@ -94,6 +94,11 @@ pub enum Action {
     UiScaleStep(i32),
     ToggleLines,
     ToggleMissions,
+    BusTab(u8),
+    Qty(i8),
+    PaintPick(u8),
+    PatternPick(u8),
+    BuyUsed(usize),
     OpenLink(u8),
     ResumeGame,
     SaveGame,
@@ -694,8 +699,8 @@ pub fn spawn_game_ui(
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(14.0),
-                right: Val::Px(14.0),
+                top: Val::Px(14.0),
+                left: Val::Px(14.0),
                 ..default()
             },
         ))
@@ -1156,7 +1161,7 @@ fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
         Action::SetView(View::Depot) => "Depot",
         Action::SetView(View::Staff) => "Staff",
         Action::SetView(View::Map) => "Map",
-        Action::OpenPanel(0) => "Bus shop",
+        Action::OpenPanel(0) => "Buses",
         Action::OpenPanel(1) => "Build in the depot",
         Action::ToggleLines => "Lines",
         Action::Menu => "Menu",

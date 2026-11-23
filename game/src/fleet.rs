@@ -120,9 +120,9 @@ impl Category {
     pub fn label(self) -> &'static str {
         match self {
             Category::Minibus => "Minibus",
-            Category::Solo => "Solo bus",
+            Category::Solo => "Solo",
             Category::Doubledecker => "Double-decker",
-            Category::Articulated => "Articulated",
+            Category::Articulated => "Artic.",
         }
     }
 
@@ -377,8 +377,41 @@ pub struct Depart {
     pub total: f32,
 }
 
+/// A custom paint job chosen when buying: body colour plus a pattern
+/// (0 plain, 1 side stripe, 2 roof cap).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Paint {
+    pub rgb: (u8, u8, u8),
+    pub pattern: u8,
+}
+
+impl Paint {
+    pub const PATTERNS: [&'static str; 3] = ["Plain", "Side stripe", "Roof cap"];
+
+    /// Contrasting colour used by the patterns.
+    pub fn accent(rgb: (u8, u8, u8)) -> (u8, u8, u8) {
+        let lum = 0.3 * rgb.0 as f32 + 0.59 * rgb.1 as f32 + 0.11 * rgb.2 as f32;
+        if lum > 170.0 {
+            (0x3a, 0x3f, 0x4a)
+        } else {
+            (0xf4, 0xf4, 0xf0)
+        }
+    }
+
+    pub fn of_color(c: Color) -> (u8, u8, u8) {
+        let s = c.to_srgba();
+        (
+            (s.red * 255.0).round() as u8,
+            (s.green * 255.0).round() as u8,
+            (s.blue * 255.0).round() as u8,
+        )
+    }
+}
+
 pub struct FleetBus {
     pub id: u32,
+    /// `None` = factory colours.
+    pub paint: Option<Paint>,
     pub plate: String,
     pub spec: usize,
     /// 0..100 each.
@@ -394,6 +427,11 @@ pub struct FleetBus {
 }
 
 impl FleetBus {
+    /// What the bus would sell for: worn buses are worth less.
+    pub fn sell_value(&self, new_price: f64) -> f64 {
+        new_price * (0.3 + 0.4 * (self.condition as f64 / 100.0))
+    }
+
     pub fn needs_service(&self) -> bool {
         self.fuel <= 5.0 || self.condition <= 5.0 || self.clean <= 5.0
     }
@@ -494,6 +532,18 @@ impl Fleet {
 
     /// Adds a new bus parked in a free bay.
     pub fn add(&mut self, spec: usize) -> Option<u32> {
+        self.add_custom(spec, None, 100.0, 100.0, 100.0)
+    }
+
+    /// Adds a bus with a paint job and wear (second-hand buses).
+    pub fn add_custom(
+        &mut self,
+        spec: usize,
+        paint: Option<Paint>,
+        fuel: f32,
+        condition: f32,
+        clean: f32,
+    ) -> Option<u32> {
         if self.buses.len() >= self.stand_count() {
             return None;
         }
@@ -504,9 +554,10 @@ impl Fleet {
             id,
             plate: plate_for(id),
             spec,
-            fuel: 100.0,
-            condition: 100.0,
-            clean: 100.0,
+            paint,
+            fuel,
+            condition,
+            clean,
             line: None,
             bay: Some(bay),
             assigned: None,

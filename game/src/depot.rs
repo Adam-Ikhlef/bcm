@@ -779,7 +779,10 @@ pub fn sync_depot_buses(
             &asset_server,
             &mut materials,
             spec,
-            spec.color,
+            fb.paint
+                .map(|p| style::rgb(p.rgb.0, p.rgb.1, p.rgb.2))
+                .unwrap_or(spec.color),
+            fb.paint.map(|p| p.pattern).unwrap_or(0),
             Transform::from_translation(bay_pos(bay)),
         );
         commands.entity(e).insert((DepotBus(id), GameWorld));
@@ -1161,25 +1164,6 @@ pub fn spawn_depot_ui(mut commands: Commands) {
     ));
 }
 
-fn stat_line(f: &UiFonts, label: &str, v: f32) -> impl Bundle {
-    (
-        Node {
-            justify_content: JustifyContent::SpaceBetween,
-            ..default()
-        },
-        children![
-            text(f, false, 12.0, style::MUTED, label.to_string()),
-            text(
-                f,
-                true,
-                12.0,
-                level_color(v),
-                format!("{}%", v.round() as i32)
-            ),
-        ],
-    )
-}
-
 #[derive(Resource, Default)]
 pub struct ShopTab(pub Category);
 
@@ -1193,8 +1177,23 @@ pub fn rebuild_panel(
     panel: Res<DepotPanel>,
     tool: Res<BuildTool>,
     body: Single<Entity, With<DepotBody>>,
-    mut last: Local<Option<(u32, Option<u32>, bool, Category, DepotPanel, BuildTool)>>,
+    mut last: Local<
+        Option<(
+            u32,
+            Option<u32>,
+            bool,
+            Category,
+            DepotPanel,
+            BuildTool,
+            crate::bus_menu::BuyState,
+            u32,
+        )>,
+    >,
     view: Res<View>,
+    st: Res<crate::bus_menu::BuyState>,
+    market: Res<crate::bus_menu::Market>,
+    mut thumbs: ResMut<crate::bus_menu::Thumbs>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let key = (
         fleet.version,
@@ -1203,6 +1202,8 @@ pub fn rebuild_panel(
         tab.0,
         *panel,
         *tool,
+        *st,
+        market.version,
     );
     if *last == Some(key) {
         return;
@@ -1271,9 +1272,16 @@ pub fn rebuild_panel(
                                     "Not assigned to a line (use “+ Bus” on the map)".to_string(),
                             }
                         ),
-                        stat_line(f, "Fuel", b.fuel),
-                        stat_line(f, "Condition", b.condition),
-                        stat_line(f, "Cleanliness", b.clean),
+                        text(
+                            f,
+                            false,
+                            12.0,
+                            style::MUTED,
+                            format!(
+                                "Fuel {:.0}% · Condition {:.0}% · Clean {:.0}%",
+                                b.fuel, b.condition, b.clean
+                            )
+                        ),
                         (
                             Node {
                                 column_gap: Val::Px(8.0),
@@ -1289,7 +1297,7 @@ pub fn rebuild_panel(
                                 ),
                                 button(
                                     f,
-                                    format!("Sell  {}", fmt_money(spec.price * 0.6)),
+                                    format!("Sell  {}", fmt_money(b.sell_value(spec.price))),
                                     Action::Sell(b.id),
                                     BtnKind::Small
                                 ),
@@ -1322,84 +1330,23 @@ pub fn rebuild_panel(
                     false,
                     12.0,
                     style::TEXT,
-                    "Your depot is empty. Open Build (hammer button) to place parking stands, then open Shop to buy buses.",
+                    "Your depot is empty. Open Build (hammer button) to place parking stands, then open Buses to buy some.",
                 ));
             }
             return;
         }
 
-        // Shop
-        p.spawn(text(f, true, 12.0, style::MUTED, "FLEET SHOP"));
-        p.spawn(Node {
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(4.0),
-            row_gap: Val::Px(4.0),
-            ..default()
-        })
-        .with_children(|row| {
-            for c in Category::ALL {
-                let kind = if c == tab.0 {
-                    BtnKind::Primary
-                } else {
-                    BtnKind::Small
-                };
-                row.spawn(button(f, c.label(), Action::ShopTab(c), kind));
-            }
-        });
-        let mut shown = 0;
-        for (i, spec) in catalog
-            .0
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.category == tab.0)
-        {
-            shown += 1;
-            let tag = if spec.is_mod { " (mod)" } else { "" };
-            p.spawn((
-                Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                },
-                children![
-                    (
-                        Node {
-                            flex_direction: FlexDirection::Column,
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        children![
-                            text(f, true, 13.0, style::TEXT, format!("{}{tag}", spec.name)),
-                            text(
-                                f,
-                                false,
-                                11.0,
-                                style::MUTED,
-                                format!(
-                                    "{} passengers · {:.0} m",
-                                    spec.capacity as i32, spec.length
-                                )
-                            ),
-                        ]
-                    ),
-                    button(
-                        f,
-                        format!("Buy  {}", fmt_money(spec.price)),
-                        Action::Buy(i),
-                        BtnKind::Small
-                    ),
-                ],
-            ));
-        }
-        if shown == 0 {
-            p.spawn(text(
-                f,
-                false,
-                11.0,
-                style::MUTED,
-                "No buses in this category.",
-            ));
-        }
+        crate::bus_menu::body(
+            p,
+            f,
+            &fleet,
+            &catalog,
+            *st,
+            tab.0,
+            &market,
+            &mut thumbs,
+            &mut images,
+        );
     });
 }
 
@@ -1414,33 +1361,78 @@ pub fn depot_actions(
     mut selected: ResMut<Selected>,
     mut view: ResMut<View>,
     mut tab: ResMut<ShopTab>,
+    mut st: ResMut<crate::bus_menu::BuyState>,
+    mut market: ResMut<crate::bus_menu::Market>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
             Action::SetView(v) => *view = v,
+            Action::BusTab(t) => st.tab = t,
+            Action::Qty(d) => {
+                st.qty = (st.qty as i32 + d as i32).clamp(1, crate::bus_menu::MAX_QTY as i32) as u8
+            }
+            Action::PaintPick(i) => st.paint = i,
+            Action::PatternPick(i) => st.pattern = i,
+            Action::BuyUsed(k) => {
+                let Some(u) = market.items.get(k).cloned() else {
+                    continue;
+                };
+                let name = catalog.0[u.spec].name.clone();
+                if fleet.stand_count() == 0 {
+                    eco.say(&real, "Build a parking stand first (Build button)");
+                } else if fleet.buses.len() >= fleet.stand_count() {
+                    eco.say(&real, "No free stand: build another stand or sell a bus");
+                } else if eco.money < u.price {
+                    eco.say(
+                        &real,
+                        format!("Not enough money: {name} costs {}", fmt_money(u.price)),
+                    );
+                } else if let Some(id) =
+                    fleet.add_custom(u.spec, Some(u.paint), u.fuel, u.condition, u.clean)
+                {
+                    eco.money -= u.price;
+                    selected.0 = Some(id);
+                    market.items.remove(k);
+                    market.version += 1;
+                    eco.say(&real, format!("Bought a used {name}"));
+                }
+            }
             Action::SelectBus(id) => selected.0 = Some(id),
             Action::ShopTab(c) => tab.0 = c,
             Action::Buy(i) => {
                 let Some(spec) = catalog.0.get(i) else {
                     continue;
                 };
+                let n = st.qty as usize;
+                let free = fleet.stand_count().saturating_sub(fleet.buses.len());
+                let total = spec.price * n as f64;
                 if fleet.stand_count() == 0 {
                     eco.say(&real, "Build a parking stand first (Build button)");
-                } else if fleet.buses.len() >= fleet.stand_count() {
-                    eco.say(&real, "No free stand: build another stand or sell a bus");
-                } else if eco.money < spec.price {
+                } else if free < n {
+                    eco.say(
+                        &real,
+                        format!("Only {free} free stand(s): build more stands or buy fewer buses"),
+                    );
+                } else if eco.money < total {
                     eco.say(
                         &real,
                         format!(
-                            "Not enough money: {} costs {}",
+                            "Not enough money: {n} × {} costs {}",
                             spec.name,
-                            fmt_money(spec.price)
+                            fmt_money(total)
                         ),
                     );
-                } else if let Some(id) = fleet.add(i) {
-                    eco.money -= spec.price;
-                    selected.0 = Some(id);
-                    eco.say(&real, format!("Bought {}", spec.name));
+                } else {
+                    let paint = st.paint_for(spec);
+                    let mut last = None;
+                    for _ in 0..n {
+                        last = fleet.add_custom(i, paint, 100.0, 100.0, 100.0);
+                    }
+                    eco.money -= total;
+                    if last.is_some() {
+                        selected.0 = last;
+                    }
+                    eco.say(&real, format!("Bought {n} × {}", spec.name));
                 }
             }
             Action::Service(id) => {
@@ -1473,7 +1465,7 @@ pub fn depot_actions(
                 if b.line.is_some() || b.depart.is_some() {
                     continue;
                 }
-                let value = catalog.0[b.spec].price * 0.6;
+                let value = b.sell_value(catalog.0[b.spec].price);
                 fleet.buses.retain(|x| x.id != id);
                 fleet.version += 1;
                 eco.money += value;
@@ -1549,6 +1541,7 @@ pub fn menu_backdrop_buses(
             &mut materials,
             spec,
             spec.color,
+            0,
             Transform::from_translation(bay_pos(bay)),
         );
         commands.entity(e).insert(GameWorld);
