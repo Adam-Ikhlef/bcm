@@ -93,6 +93,7 @@ pub enum Action {
     ToggleVsync,
     UiScaleStep(i32),
     ToggleLines,
+    ToggleMissions,
     OpenLink(u8),
     ResumeGame,
     SaveGame,
@@ -358,7 +359,6 @@ pub const SIDEBAR_W: f32 = 0.0;
 /// Icons of the navigation sidebar (white on transparent, tinted by the buttons).
 #[derive(Resource)]
 pub struct NavIcons {
-    pub map: Handle<Image>,
     pub depot: Handle<Image>,
     /// Blue depot marker drawn on the map.
     pub pin: Handle<Image>,
@@ -392,7 +392,6 @@ pub fn install_nav_icons(world: &mut World) {
         images.add(img)
     };
     let icons = NavIcons {
-        map: load(include_bytes!("../assets/icons/map.png")),
         depot: load(include_bytes!("../assets/icons/depot.png")),
         pin: load(include_bytes!("../assets/icons/depot_pin.png")),
         shop: load(include_bytes!("../assets/icons/shop.png")),
@@ -448,7 +447,65 @@ pub struct LinesOpen(pub bool);
 
 impl Default for LinesOpen {
     fn default() -> Self {
+        Self(false)
+    }
+}
+
+/// Whether the Missions panel is expanded (it can be tucked away to the right).
+#[derive(Resource)]
+pub struct MissionsOpen(pub bool);
+
+impl Default for MissionsOpen {
+    fn default() -> Self {
         Self(true)
+    }
+}
+
+#[derive(Component)]
+pub struct MissionsPanel;
+#[derive(Component)]
+pub struct MissionsTab;
+
+/// Toggles the missions panel, and starts every visit to the big map with the Lines panel closed.
+pub fn panel_toggles(
+    mut events: EventReader<UiAction>,
+    view: Res<View>,
+    mut last: Local<Option<View>>,
+    mut lines: ResMut<LinesOpen>,
+    mut missions: ResMut<MissionsOpen>,
+    mut panel: Query<&mut Node, (With<MissionsPanel>, Without<MissionsTab>)>,
+    mut tab: Query<&mut Visibility, With<MissionsTab>>,
+) {
+    for UiAction(a) in events.read() {
+        if *a == Action::ToggleMissions {
+            missions.0 = !missions.0;
+        }
+    }
+    if *last != Some(*view) {
+        if *view == View::Map && *last != None {
+            lines.0 = false;
+        }
+        *last = Some(*view);
+    }
+    for mut n in &mut panel {
+        let want = if missions.0 {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if n.display != want {
+            n.display = want;
+        }
+    }
+    for mut v in &mut tab {
+        let want = if missions.0 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        if *v != want {
+            *v = want;
+        }
     }
 }
 
@@ -595,7 +652,6 @@ pub fn spawn_game_ui(
             BorderRadius::all(Val::Px(12.0)),
         ))
         .with_children(|p| {
-            nav_button(p, &icons.map, style::CBM_BLUE, Action::SetView(View::Map));
             nav_button(
                 p,
                 &icons.depot,
@@ -621,7 +677,7 @@ pub fn spawn_game_ui(
             crate::depot::MapUi,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(14.0),
+                top: Val::Px(76.0),
                 right: Val::Px(14.0),
                 width: Val::Px(330.0),
                 flex_direction: FlexDirection::Column,
@@ -629,8 +685,64 @@ pub fn spawn_game_ui(
                 ..default()
             },
         ))
-        .with_children(crate::sidebar::spawn_minimap)
         .id();
+    // Minimap: depot view only (click it to open the big map)
+    commands
+        .spawn((
+            GameUi,
+            crate::depot::DepotUi,
+            Node {
+                display: Display::None,
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(14.0),
+                right: Val::Px(14.0),
+                ..default()
+            },
+        ))
+        .with_children(crate::sidebar::spawn_minimap);
+    // Tab that brings the missions back once they are tucked away
+    commands
+        .spawn((
+            GameUi,
+            MapUi,
+            MissionsTab,
+            Visibility::Hidden,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(120.0),
+                right: Val::Px(0.0),
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            p.spawn(button(
+                f,
+                "‹ Missions",
+                Action::ToggleMissions,
+                BtnKind::Small,
+            ));
+        });
+    // Close the big map and go back to the depot (top right of the map view)
+    commands
+        .spawn((
+            GameUi,
+            crate::depot::MapUi,
+            crate::site::CloseMap,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(14.0),
+                right: Val::Px(14.0),
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            nav_button(
+                p,
+                &icons.cross,
+                style::CBM_RED,
+                Action::SetView(View::Depot),
+            );
+        });
     // Lines panel
     let lines_panel = commands
         .spawn((
@@ -1038,6 +1150,23 @@ pub fn update_toolbar(
     }
 }
 
+/// Short hover label for the icon-only buttons.
+fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
+    Some(match a {
+        Action::SetView(View::Depot) => "Depot",
+        Action::SetView(View::Staff) => "Staff",
+        Action::SetView(View::Map) => "Map",
+        Action::OpenPanel(0) => "Bus shop",
+        Action::OpenPanel(1) => "Build in the depot",
+        Action::ToggleLines => "Lines",
+        Action::Menu => "Menu",
+        Action::Finish => "Finish the line",
+        Action::Cancel => "Cancel",
+        Action::ToggleMissions if missions_open => "Hide the missions",
+        _ => return None,
+    })
+}
+
 pub fn update_tooltip(
     hover: Res<Hover>,
     map: Res<MapData>,
@@ -1045,7 +1174,23 @@ pub fn update_tooltip(
     window: Single<&Window, With<PrimaryWindow>>,
     mut node: Single<&mut Node, With<Tooltip>>,
     mut text: Single<&mut Text, With<TooltipText>>,
+    buttons: Query<(&Interaction, &Action)>,
+    missions: Res<MissionsOpen>,
 ) {
+    // Icon buttons: a short label above the cursor
+    let tip = buttons
+        .iter()
+        .filter(|(i, _)| **i != Interaction::None)
+        .find_map(|(_, a)| tip_for(*a, missions.0));
+    if let Some(tip) = tip {
+        if text.0 != tip {
+            text.0 = tip.to_string();
+        }
+        node.display = Display::Flex;
+        node.left = Val::Px((hover.cursor.x - 20.0).min(window.width() - 160.0).max(4.0));
+        node.top = Val::Px((hover.cursor.y - 46.0).max(4.0));
+        return;
+    }
     match hover.stop {
         Some(i) => {
             let stop = &map.stops[i];

@@ -267,6 +267,7 @@ fn main() {
     .init_resource::<planner::Search>()
     .init_resource::<planner::DraftMeta>()
     .init_resource::<ui::LinesOpen>()
+    .init_resource::<ui::MissionsOpen>()
     .init_resource::<sidebar::Missions>()
     .init_resource::<save::PendingLoad>()
     .init_resource::<save::SaveRequest>()
@@ -332,6 +333,7 @@ fn main() {
             ui::track_ui_block,
             settings::apply_settings,
             ui::ui_toggles,
+            ui::panel_toggles,
             ui::lines_panel_visibility,
         )
             .chain(),
@@ -420,6 +422,7 @@ fn main() {
                 site::placing_actions,
                 site::update_pin,
                 sidebar::sync_mini_depot,
+                site::guard_view,
             ),
             hotkeys,
             planner::planner_actions,
@@ -518,15 +521,8 @@ fn init_game(
         picked: None,
     });
 
-    // Starting staff: two early drivers and one late driver, plus today's candidates.
+    // A new company starts with no staff: the player hires everyone.
     let mut staff = Staff::default();
-    for (k, shift) in [ops::Shift::Early, ops::Shift::Early, ops::Shift::Late]
-        .into_iter()
-        .enumerate()
-    {
-        let d = staff.make_driver(1000 + k as u64, shift);
-        staff.drivers.push(d);
-    }
     staff.refresh_candidates(0);
     commands.insert_resource(staff);
 

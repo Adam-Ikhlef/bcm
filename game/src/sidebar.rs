@@ -231,6 +231,7 @@ pub fn update_minimap(
     cam: Single<(&mut Transform, &Projection), (With<MapCamera>, Without<Bus>)>,
     window: Single<&Window, With<PrimaryWindow>>,
     mouse: Res<ButtonInput<MouseButton>>,
+    mut view_res: ResMut<crate::depot::View>,
 ) {
     let Some(mm) = mm else { return };
     let (root_e, rel) = *root;
@@ -277,14 +278,15 @@ pub fn update_minimap(
         n.height = Val::Px(size.y.max(6.0));
     }
 
-    // click / drag on the minimap moves the camera
-    if mouse.pressed(MouseButton::Left) {
+    // clicking the minimap (depot view) opens the big map at that spot
+    if *view_res == crate::depot::View::Depot && mouse.just_pressed(MouseButton::Left) {
         if let Some(n) = rel.normalized {
             if rel.mouse_over() {
                 let px = Vec2::new((n.x + 0.5) * MM_W, (n.y + 0.5) * MM_H);
                 let w = mm.to_world(px);
                 cam_tf.translation.x = w.x;
                 cam_tf.translation.y = w.y;
+                *view_res = crate::depot::View::Map;
             }
         }
     }
@@ -325,7 +327,7 @@ const MISSIONS: [Mission; 10] = [
         reward: 1_500.0,
     },
     Mission {
-        title: "Hire a 4th driver",
+        title: "Hire 4 drivers",
         target: 4.0,
         reward: 1_000.0,
     },
@@ -389,6 +391,7 @@ pub struct SlotBar(usize);
 
 pub fn spawn_missions(c: &mut ChildSpawnerCommands, f: &UiFonts) {
     c.spawn((
+        crate::ui::MissionsPanel,
         Interaction::default(),
         Node {
             flex_direction: FlexDirection::Column,
@@ -402,7 +405,20 @@ pub fn spawn_missions(c: &mut ChildSpawnerCommands, f: &UiFonts) {
         BorderRadius::all(Val::Px(14.0)),
     ))
     .with_children(|p| {
-        p.spawn(text(f, true, 16.0, style::TEXT, "Missions"));
+        p.spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|h| {
+            h.spawn(text(f, true, 16.0, style::TEXT, "Missions"));
+            h.spawn(crate::ui::button(
+                f,
+                "Hide ›",
+                crate::ui::Action::ToggleMissions,
+                crate::ui::BtnKind::Small,
+            ));
+        });
         for i in 0..3 {
             p.spawn((
                 Slot(i),

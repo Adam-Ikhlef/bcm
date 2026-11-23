@@ -24,6 +24,9 @@ pub struct Placing {
 
 #[derive(Component)]
 pub struct DepotPin;
+/// The X button that closes the big map.
+#[derive(Component)]
+pub struct CloseMap;
 #[derive(Component)]
 pub struct PlacingUi;
 #[derive(Component)]
@@ -219,6 +222,27 @@ pub fn placing_actions(
                 cam.translation.x = pos.x;
                 cam.translation.y = pos.y;
             }
+        }
+    }
+}
+
+/// While the depot location is being chosen the player stays on the map: no closing it.
+pub fn guard_view(
+    placing: Res<Placing>,
+    mut view: ResMut<crate::depot::View>,
+    mut close: Query<&mut Visibility, With<CloseMap>>,
+) {
+    if placing.active && *view != crate::depot::View::Map {
+        *view = crate::depot::View::Map;
+    }
+    let want = if placing.active {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for mut v in &mut close {
+        if *v != want {
+            *v = want;
         }
     }
 }

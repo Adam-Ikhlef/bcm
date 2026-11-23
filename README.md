@@ -127,8 +127,9 @@ they are downloaded again (delete the city's cache file in the BusManager `cache
 **New Game** first asks for your **company name** and **logo** (one of six built-in logos, or your own PNG/JPG
 by typing its file path). They are saved and shown in the HUD; later they will be used for customer reviews,
 social media and contracts. Then you pick the city. The HUD has the money/clock card (bottom left), coloured
-buttons for Map, Depot, Staff, Lines and Menu, and on the right a **minimap** (click it to move the camera),
-the Lines list and **Missions** that pay cash rewards.
+buttons for Depot, Shop, Build, Staff, Lines and Menu. In the depot view a **minimap** sits bottom right; click it to
+open the big map at that spot, and close the map with the red X (top right) to return to the depot. The map view
+shows the Lines list and **Missions** that pay cash rewards.
 
 ## Game modes, saving and loading
 
@@ -175,13 +176,13 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
 - [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
-- [ ] **Hover tooltips**: hovering any icon shows a small text saying what it is
+- [x] **Hover tooltips**: hovering any icon shows a small text saying what it is
 - [ ] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
 - [ ] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase
 - [ ] Build stands, staff rooms and other depot buildings **anywhere** in the depot (free placement)
 - [ ] **Depot expansion by research** (the starting lot is small)
 - [ ] Fuel station, wash bay and workshop are required for every company (one of the first missions); build **more than one** of each
-- [ ] A new company starts with **no staff** (like no buses and no stands)
+- [x] A new company starts with **no staff** (like no buses and no stands)
 - [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
 - [x] Update checker with changelog
 - [x] Passenger destinations: riders pick destination stops (busier and nearer stops attract more), only board buses that pass them and get off there; hover a stop to see where its riders want to go
