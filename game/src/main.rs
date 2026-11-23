@@ -15,6 +15,7 @@ mod render;
 mod save;
 mod settings;
 mod sidebar;
+mod site;
 mod staffui;
 mod style;
 mod ui;
@@ -286,6 +287,7 @@ fn main() {
     .init_resource::<lot::DepotPanel>()
     .init_resource::<lot::BuildTool>()
     .init_resource::<lot::BuildHover>()
+    .init_resource::<site::Placing>()
     .init_resource::<depot::DepotHover>()
     .init_resource::<depot::DepotView>()
     .init_resource::<render::RoadLayers>()
@@ -349,6 +351,8 @@ fn main() {
             depot::spawn_depot_ui,
             staffui::spawn_staff_ui,
             sidebar::build_minimap,
+            site::spawn_pin,
+            site::begin_placing,
         )
             .chain(),
     )
@@ -410,6 +414,13 @@ fn main() {
                 .run_if(depot::in_depot_view),
             game_actions,
             (depot::depot_actions, lot::lot_actions).chain(),
+            (
+                site::placing_ui,
+                site::placing_input,
+                site::placing_actions,
+                site::update_pin,
+                sidebar::sync_mini_depot,
+            ),
             hotkeys,
             planner::planner_actions,
             planner::search_input,
@@ -441,6 +452,7 @@ fn main() {
 fn init_game(
     mut commands: Commands,
     session: Res<save::Session>,
+    pending: Res<save::PendingLoad>,
     map: Res<MapData>,
     catalog: Res<Catalog>,
     window: Single<&Window, With<PrimaryWindow>>,
@@ -500,6 +512,11 @@ fn init_game(
         })
         .expect("map has no roads");
     commands.insert_resource(site);
+    // A new game lets the player choose the depot spot; a loaded one restores it.
+    commands.insert_resource(site::Placing {
+        active: pending.0.is_none(),
+        picked: None,
+    });
 
     // Starting staff: two early drivers and one late driver, plus today's candidates.
     let mut staff = Staff::default();

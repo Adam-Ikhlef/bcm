@@ -175,11 +175,18 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
 - [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
+- [ ] **Hover tooltips**: hovering any icon shows a small text saying what it is
+- [ ] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
+- [ ] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase
+- [ ] Build stands, staff rooms and other depot buildings **anywhere** in the depot (free placement)
+- [ ] **Depot expansion by research** (the starting lot is small)
+- [ ] Fuel station, wash bay and workshop are required for every company (one of the first missions); build **more than one** of each
+- [ ] A new company starts with **no staff** (like no buses and no stands)
 - [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
 - [x] Update checker with changelog
 - [x] Passenger destinations: riders pick destination stops (busier and nearer stops attract more), only board buses that pass them and get off there; hover a stop to see where its riders want to go
 - [x] In-game updater: "Update now" downloads the release, verifies its SHA-256, replaces the game and restarts it
 - [x] Discord Rich Presence (toggle in Options)
 - [x] **Website** on GitHub Pages (`docs/`), served at busmanager.yoz-team.online
-- [ ] **Choose your depot location** on the map at the start of a new game; the depot stays marked with an icon all game
+- [x] **Choose your depot location** on the map at the start of a new game; the depot stays marked with an icon all game
 - [x] Save/load, game modes (Casual / Realistic / Sandbox)

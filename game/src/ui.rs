@@ -118,6 +118,7 @@ pub enum Action {
     BuildTool(u8),
     BuyRoom(u8),
     ExpandLot,
+    DepotConfirm,
     /// Re-download the map data of a cached city (index into the cached list).
     UpdateMap(u8),
 }
@@ -359,6 +360,8 @@ pub const SIDEBAR_W: f32 = 0.0;
 pub struct NavIcons {
     pub map: Handle<Image>,
     pub depot: Handle<Image>,
+    /// Blue depot marker drawn on the map.
+    pub pin: Handle<Image>,
     pub shop: Handle<Image>,
     pub build: Handle<Image>,
     pub staff: Handle<Image>,
@@ -391,6 +394,7 @@ pub fn install_nav_icons(world: &mut World) {
     let icons = NavIcons {
         map: load(include_bytes!("../assets/icons/map.png")),
         depot: load(include_bytes!("../assets/icons/depot.png")),
+        pin: load(include_bytes!("../assets/icons/depot_pin.png")),
         shop: load(include_bytes!("../assets/icons/shop.png")),
         build: load(include_bytes!("../assets/icons/build.png")),
         staff: load(include_bytes!("../assets/icons/staff.png")),

@@ -162,6 +162,9 @@ pub struct SaveData {
     stands: Option<Vec<bool>>,
     #[serde(default)]
     lot_level: u8,
+    /// Depot position on the map; `None` in older saves (the game picks the default spot).
+    #[serde(default)]
+    depot: Option<(f32, f32)>,
     #[serde(default)]
     rooms: Vec<bool>,
     drivers: Vec<Driver>,
@@ -298,6 +301,9 @@ fn collect(world: &World) -> Option<SaveData> {
             })
             .collect(),
         fleet_next_id: fleet.next_id,
+        depot: world
+            .get_resource::<crate::ops::DepotSite>()
+            .map(|d| (d.pos.x, d.pos.y)),
         stands: Some(fleet.stands.to_vec()),
         lot_level: fleet.lot_level,
         rooms: fleet.rooms.to_vec(),
@@ -349,7 +355,13 @@ pub fn apply_pending_load(world: &mut World) {
         return;
     };
     let map = world.remove_resource::<MapData>().expect("map");
-    let depot = *world.resource::<crate::ops::DepotSite>();
+    let mut depot = *world.resource::<crate::ops::DepotSite>();
+    if let Some((x, y)) = data.depot {
+        if let Some((node, pos)) = map.nearest_node(Vec2::new(x, y), 100.0) {
+            depot = crate::ops::DepotSite { node, pos };
+            world.insert_resource(depot);
+        }
+    }
     let catalog = world.remove_resource::<Catalog>().expect("catalog");
 
     let mut lines = Lines::default();

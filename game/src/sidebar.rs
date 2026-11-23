@@ -28,7 +28,7 @@ pub struct MiniBus;
 #[derive(Component)]
 pub struct MiniView;
 #[derive(Component)]
-struct MiniDepot;
+pub struct MiniDepot;
 
 /// Mapping between world meters and minimap pixels.
 #[derive(Resource, Clone, Copy)]
@@ -518,5 +518,22 @@ pub fn update_missions(
             let v = progress(idx(s.0), &lines, nb, &eco, &staff, &trips, &fleet) / m.target;
             n.width = Val::Percent((v * 100.0).clamp(0.0, 100.0) as f32);
         }
+    }
+}
+
+/// Keeps the minimap depot marker on the chosen depot site.
+pub fn sync_mini_depot(
+    site: Res<DepotSite>,
+    mm: Option<Res<MiniMap>>,
+    mut q: Query<&mut Node, With<MiniDepot>>,
+) {
+    let Some(mm) = mm else { return };
+    if !site.is_changed() {
+        return;
+    }
+    let p = mm.to_px(site.pos);
+    for mut n in &mut q {
+        n.left = Val::Px(p.x - 9.0);
+        n.top = Val::Px(p.y - 9.0);
     }
 }
