@@ -2,6 +2,7 @@
 //! and, if there is a newer one, shows its changelog with "Download" and "Remind me later".
 
 use std::{
+    io::Read,
     sync::{
         mpsc::{channel, Receiver},
         Mutex,
@@ -33,6 +34,16 @@ pub struct Release {
     pub version: String,
     pub notes: String,
     pub url: String,
+    /// The download for this system, if the release has one.
+    pub asset: Option<Asset>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Asset {
+    pub url: String,
+    /// Hex SHA-256 published by GitHub, when available.
+    pub sha256: Option<String>,
+    pub version: String,
 }
 
 #[derive(Resource, Default)]
@@ -43,20 +54,26 @@ pub struct Updates {
     /// "Remind me later" was pressed (or the window was shown): nothing more this session.
     pub dismissed: bool,
     shown: bool,
+    /// Result of the running download/installation.
+    installing: Option<Mutex<Receiver<Result<std::path::PathBuf, String>>>>,
 }
 
 #[derive(Component)]
 struct UpdateModal;
+#[derive(Component)]
+struct UpdateStatus;
+#[derive(Component)]
+struct UpdateButtons;
 
 pub struct UpdatePlugin;
 
 impl Plugin for UpdatePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Updates>()
-            .add_systems(Startup, start_check)
+            .add_systems(Startup, (start_check, remove_old_exe))
             .add_systems(
                 Update,
-                (poll_check, show_modal, update_actions)
+                (poll_check, show_modal, update_actions, poll_install)
                     .chain()
                     .run_if(in_state(AppState::Menu)),
             )
@@ -72,6 +89,28 @@ struct GhRelease {
     html_url: String,
     #[serde(default)]
     draft: bool,
+    #[serde(default)]
+    assets: Vec<GhAsset>,
+}
+
+#[derive(Deserialize)]
+struct GhAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)]
+    digest: Option<String>,
+}
+
+/// Name of the release file that holds the game for this system.
+pub fn asset_name() -> String {
+    let (os, ext) = if cfg!(windows) {
+        ("windows", "zip")
+    } else if cfg!(target_os = "macos") {
+        ("macos", "tar.gz")
+    } else {
+        ("linux", "tar.gz")
+    };
+    format!("busmanager-{os}.{ext}")
 }
 
 /// "v1.2.3-beta" -> [1, 2, 3]
@@ -136,10 +175,21 @@ fn fetch() -> Option<Release> {
     if !is_newer(&best.tag_name, crate::VERSION) {
         return None;
     }
+    let want = asset_name();
+    let asset = best.assets.iter().find(|a| a.name == want).map(|a| Asset {
+        version: best.tag_name.trim_start_matches(['v', 'V']).to_string(),
+        url: a.browser_download_url.clone(),
+        sha256: a
+            .digest
+            .as_deref()
+            .and_then(|d| d.strip_prefix("sha256:"))
+            .map(|d| d.to_ascii_lowercase()),
+    });
     Some(Release {
         version: best.tag_name.trim_start_matches(['v', 'V']).to_string(),
         notes: plain_notes(best.body.as_deref().unwrap_or("")),
         url: best.html_url,
+        asset,
     })
 }
 
@@ -219,6 +269,7 @@ fn show_modal(
                         crate::VERSION
                     )
                 ),
+                (UpdateStatus, text(f, false, 14.0, style::ACCENT, "")),
                 text(f, true, 13.0, style::ACCENT, "WHAT'S NEW"),
                 (
                     Node {
@@ -242,6 +293,7 @@ fn show_modal(
                     )]
                 ),
                 (
+                    UpdateButtons,
                     Node {
                         column_gap: Val::Px(10.0),
                         justify_content: JustifyContent::FlexEnd,
@@ -249,7 +301,21 @@ fn show_modal(
                     },
                     children![
                         button(f, "Remind me later", Action::UpdateLater, BtnKind::Normal),
-                        button(f, "Download", Action::UpdateDownload, BtnKind::Primary),
+                        button(f, "Release page", Action::UpdateDownload, BtnKind::Normal),
+                        button(
+                            f,
+                            if rel.asset.is_some() {
+                                "Update now"
+                            } else {
+                                "Release page"
+                            },
+                            if rel.asset.is_some() {
+                                Action::UpdateInstall
+                            } else {
+                                Action::UpdateDownload
+                            },
+                            BtnKind::Primary
+                        ),
                     ]
                 ),
             ]
@@ -262,9 +328,34 @@ fn update_actions(
     mut events: EventReader<UiAction>,
     mut updates: ResMut<Updates>,
     modal: Query<Entity, With<UpdateModal>>,
+    mut status: Query<&mut Text, With<UpdateStatus>>,
+    mut buttons: Query<&mut Node, With<UpdateButtons>>,
 ) {
     for UiAction(a) in events.read() {
         match a {
+            Action::UpdateInstall => {
+                let Some(rel) = updates.available.clone() else {
+                    continue;
+                };
+                let Some(asset) = rel.asset else { continue };
+                if updates.installing.is_some() {
+                    continue;
+                }
+                let (tx, rx) = channel();
+                updates.installing = Some(Mutex::new(rx));
+                std::thread::spawn(move || {
+                    let _ = tx.send(install(&asset));
+                });
+                for mut t in &mut status {
+                    t.0 = format!(
+                        "Downloading version {} ... the game restarts when done.",
+                        rel.version
+                    );
+                }
+                for mut n in &mut buttons {
+                    n.display = Display::None;
+                }
+            }
             Action::UpdateLater | Action::UpdateDownload => {
                 if *a == Action::UpdateDownload {
                     if let Some(r) = &updates.available {
@@ -281,9 +372,171 @@ fn update_actions(
     }
 }
 
+/// Waits for the installation; on success starts the new version and quits this one.
+fn poll_install(
+    mut updates: ResMut<Updates>,
+    mut status: Query<&mut Text, With<UpdateStatus>>,
+    mut buttons: Query<&mut Node, With<UpdateButtons>>,
+    mut exit: EventWriter<AppExit>,
+) {
+    let got = updates
+        .installing
+        .as_ref()
+        .and_then(|rx| rx.lock().ok()?.try_recv().ok());
+    let Some(res) = got else { return };
+    updates.installing = None;
+    match res {
+        Ok(exe) => {
+            for mut t in &mut status {
+                t.0 = "Updated. Restarting ...".into();
+            }
+            // `exe` is the path from before the swap: on Linux the running program's own path
+            // now points at the renamed old copy.
+            let _ = std::process::Command::new(exe).spawn();
+            exit.write(AppExit::Success);
+        }
+        Err(e) => {
+            for mut t in &mut status {
+                t.0 = format!("Update failed: {e}");
+            }
+            for mut n in &mut buttons {
+                n.display = Display::Flex;
+            }
+        }
+    }
+}
+
 fn close_modal(mut commands: Commands, modal: Query<Entity, With<UpdateModal>>) {
     for e in &modal {
         commands.entity(e).despawn();
+    }
+}
+
+// --- Installing -----------------------------------------------------------------
+
+/// Only downloads from this project's releases are installed (plus localhost for tests).
+fn trusted_asset_url(url: &str) -> bool {
+    url.starts_with("https://github.com/YOZTeam/BusManager/releases/download/")
+        || url.starts_with("http://127.0.0.1")
+}
+
+fn extract_game(archive: &[u8]) -> Result<Vec<u8>, String> {
+    let exe_name = if cfg!(windows) {
+        "busmanager.exe"
+    } else {
+        "busmanager"
+    };
+    let mut out = Vec::new();
+    if cfg!(windows) {
+        let mut zip =
+            zip::ZipArchive::new(std::io::Cursor::new(archive)).map_err(|e| e.to_string())?;
+        for i in 0..zip.len() {
+            let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
+            if std::path::Path::new(f.name())
+                .file_name()
+                .is_some_and(|n| n == exe_name)
+            {
+                std::io::Read::read_to_end(&mut f, &mut out).map_err(|e| e.to_string())?;
+                return Ok(out);
+            }
+        }
+    } else {
+        let gz = flate2::read::GzDecoder::new(archive);
+        let mut tar = tar::Archive::new(gz);
+        for entry in tar.entries().map_err(|e| e.to_string())? {
+            let mut entry = entry.map_err(|e| e.to_string())?;
+            let is_game = entry
+                .path()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n == exe_name))
+                .unwrap_or(false);
+            if is_game {
+                std::io::Read::read_to_end(&mut entry, &mut out).map_err(|e| e.to_string())?;
+                return Ok(out);
+            }
+        }
+    }
+    Err("the download does not contain the game".into())
+}
+
+fn sibling(exe: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = exe.file_name().unwrap_or_default().to_os_string();
+    name.push(suffix);
+    exe.with_file_name(name)
+}
+
+/// Replaces the program file `exe` with `bytes`. A running program can be renamed (not deleted) on
+/// Windows, so the old file is moved aside first and removed on the next start.
+fn swap_in(exe: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let new = sibling(exe, ".new");
+    let old = sibling(exe, ".old");
+    std::fs::write(&new, bytes).map_err(|e| format!("cannot write next to the game: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755));
+    }
+    let _ = std::fs::remove_file(&old);
+    std::fs::rename(exe, &old).map_err(|e| {
+        let _ = std::fs::remove_file(&new);
+        format!("cannot replace the game: {e}")
+    })?;
+    if let Err(e) = std::fs::rename(&new, exe) {
+        let _ = std::fs::rename(&old, exe); // put the working version back
+        let _ = std::fs::remove_file(&new);
+        return Err(format!("cannot replace the game: {e}"));
+    }
+    Ok(())
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Downloads the release, checks it and swaps it in for the running program.
+fn install(asset: &Asset) -> Result<std::path::PathBuf, String> {
+    use sha2::{Digest, Sha256};
+    if !trusted_asset_url(&asset.url) {
+        return Err("the download address is not trusted".into());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut archive = Vec::new();
+    ureq::AgentBuilder::new()
+        .user_agent(concat!("busmanager/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(600))
+        .build()
+        .get(&asset.url)
+        .call()
+        .map_err(|e| format!("download failed: {e}"))?
+        .into_reader()
+        .take(400 * 1024 * 1024)
+        .read_to_end(&mut archive)
+        .map_err(|e| format!("download failed: {e}"))?;
+    if let Some(want) = &asset.sha256 {
+        let got = hex(&Sha256::digest(&archive));
+        if &got != want {
+            return Err("the download is corrupted (checksum mismatch)".into());
+        }
+    }
+    let game = extract_game(&archive)?;
+    if game.len() < 100 * 1024 {
+        return Err("the downloaded program looks incomplete".into());
+    }
+    swap_in(&exe, &game)?;
+    // Keep the installer's idea of the installed version in sync.
+    if let (Some(dir), Some(rel)) = (exe.parent(), Some(asset.version.as_str())) {
+        let vf = dir.join("version.txt");
+        if vf.exists() {
+            let _ = std::fs::write(vf, rel);
+        }
+    }
+    Ok(exe)
+}
+
+/// Removes the previous program file left behind by an update.
+fn remove_old_exe() {
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::fs::remove_file(sibling(&exe, ".old"));
     }
 }
 
@@ -313,6 +566,56 @@ pub fn open_url(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn swap_replaces_the_program_and_keeps_old_copy() {
+        let dir = std::env::temp_dir().join(format!("bm_swap_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("busmanager");
+        std::fs::write(&exe, b"old").unwrap();
+        swap_in(&exe, b"new version").unwrap();
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new version");
+        assert_eq!(std::fs::read(sibling(&exe, ".old")).unwrap(), b"old");
+        assert!(!sibling(&exe, ".new").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn extracts_game_from_tar_gz() {
+        let mut tar_bytes = Vec::new();
+        {
+            let mut b = tar::Builder::new(&mut tar_bytes);
+            let data = b"program bytes";
+            let mut h = tar::Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, "busmanager", &data[..]).unwrap();
+            b.finish().unwrap();
+        }
+        let mut gz = Vec::new();
+        {
+            let mut e = flate2::write::GzEncoder::new(&mut gz, flate2::Compression::fast());
+            std::io::Write::write_all(&mut e, &tar_bytes).unwrap();
+            e.finish().unwrap();
+        }
+        assert_eq!(extract_game(&gz).unwrap(), b"program bytes");
+        assert!(extract_game(b"not an archive").is_err());
+    }
+
+    #[test]
+    fn only_project_downloads_are_trusted() {
+        assert!(trusted_asset_url(
+            "https://github.com/YOZTeam/BusManager/releases/download/v1/busmanager-linux.tar.gz"
+        ));
+        assert!(!trusted_asset_url(
+            "https://evil.example/busmanager-linux.tar.gz"
+        ));
+        assert!(!trusted_asset_url(
+            "https://github.com/someone/else/releases/download/v1/x"
+        ));
+    }
 
     #[test]
     fn versions() {

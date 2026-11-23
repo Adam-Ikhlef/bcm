@@ -177,6 +177,9 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
 - [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
 - [x] Update checker with changelog
-- [ ] In-game updater: download the new version, install it and restart the game
+- [x] Passenger destinations: riders pick destination stops (busier and nearer stops attract more), only board buses that pass them and get off there; hover a stop to see where its riders want to go
+- [x] In-game updater: "Update now" downloads the release, verifies its SHA-256, replaces the game and restarts it
 - [x] Discord Rich Presence (toggle in Options)
+- [x] **Website** on GitHub Pages (`docs/`), served at busmanager.yoz-team.online
+- [ ] **Choose your depot location** on the map at the start of a new game; the depot stays marked with an icon all game
 - [x] Save/load, game modes (Casual / Realistic / Sandbox)

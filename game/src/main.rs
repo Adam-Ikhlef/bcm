@@ -1,5 +1,6 @@
 mod busmodel;
 mod company;
+mod demand;
 mod depot;
 mod dispatch;
 mod fleet;
@@ -162,8 +163,27 @@ impl Economy {
 /// Waiting passengers per stop (fractional so slow rates accumulate smoothly).
 #[derive(Resource, Default)]
 pub struct StopQueues {
+    /// Total waiting per stop (sum of `by_dest`).
     pub waiting: Vec<f32>,
+    /// Destination stops of each stop and how many riders wait for each of them.
+    pub dest: Vec<Vec<usize>>,
+    pub by_dest: Vec<Vec<f32>>,
 }
+
+impl StopQueues {
+    pub fn new(stops: &[osm::Stop]) -> Self {
+        let cands = demand::build(stops);
+        Self {
+            waiting: vec![0.0; stops.len()],
+            by_dest: cands.iter().map(|c| vec![0.0; c.dest.len()]).collect(),
+            dest: cands.into_iter().map(|c| c.dest).collect(),
+        }
+    }
+}
+
+/// Share of each stop's riders per destination (fixed per map).
+#[derive(Resource, Default)]
+pub struct DestWeights(pub Vec<Vec<f32>>);
 
 pub fn palette(i: usize) -> Color {
     const COLORS: [(u8, u8, u8); 8] = [
@@ -255,6 +275,7 @@ fn main() {
     .init_resource::<staffui::TimetableUi>()
     .init_resource::<Economy>()
     .init_resource::<StopQueues>()
+    .init_resource::<DestWeights>()
     .init_resource::<Hover>()
     .init_resource::<UiBlock>()
     .init_resource::<Tool>()
@@ -425,9 +446,13 @@ fn init_game(
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&mut Transform, &mut Projection), With<MapCamera>>,
 ) {
-    commands.insert_resource(StopQueues {
-        waiting: vec![0.0; map.stops.len()],
-    });
+    commands.insert_resource(StopQueues::new(&map.stops));
+    commands.insert_resource(DestWeights(
+        demand::build(&map.stops)
+            .into_iter()
+            .map(|c| c.weight)
+            .collect(),
+    ));
     commands.insert_resource(Economy {
         money: session.mode.start_money(),
         ..default()
@@ -847,13 +872,25 @@ fn spawn_passengers(
     clock: Res<GameClock>,
     map: Res<MapData>,
     mut queues: ResMut<StopQueues>,
+    weights: Res<DestWeights>,
 ) {
     let dt = time.delta_secs();
     let tod = ops::demand_factor(clock.minute_of_day());
     for (i, s) in map.stops.iter().enumerate() {
-        if let Some(w) = queues.waiting.get_mut(i) {
-            *w = (*w + s.demand * PASSENGER_RATE * tod * dt).min(MAX_WAITING);
+        let (Some(slots), Some(w)) = (queues.by_dest.get_mut(i), weights.0.get(i)) else {
+            continue;
+        };
+        let new = s.demand * PASSENGER_RATE * tod * dt;
+        for (slot, share) in slots.iter_mut().zip(w) {
+            *slot += new * share;
         }
+        // The platform only holds so many people: scale everybody down together.
+        let total: f32 = slots.iter().sum();
+        if total > MAX_WAITING {
+            let k = MAX_WAITING / total;
+            slots.iter_mut().for_each(|x| *x *= k);
+        }
+        queues.waiting[i] = slots.iter().sum();
     }
 }
 
@@ -913,10 +950,10 @@ fn move_buses(
                     bus.phase = Phase::Running;
                     bus.next = 1 % bus.route.path.len();
                     if let Some(si) = bus.route.stop_at[0] {
-                        bus.load *= 0.6;
                         let space = (bus.capacity - bus.load).floor().max(0.0);
-                        let board = queues.waiting[si].floor().min(space);
-                        queues.waiting[si] -= board;
+                        let b = &mut *bus;
+                        let board =
+                            demand::board(&mut queues, si, &mut b.cargo, space, &b.route, 0);
                         bus.load += board;
                         earned += board as f64 * FARE;
                         eco.boarded += board as u64;
@@ -966,10 +1003,16 @@ fn move_buses(
 
                         // Reached a stop: some riders get off, waiting passengers board and pay.
                         if let Some(si) = bus.route.stop_at[idx] {
-                            bus.load *= 0.6;
-                            let space = (bus.capacity - bus.load).floor().max(0.0);
-                            let board = queues.waiting[si].floor().min(space);
-                            queues.waiting[si] -= board;
+                            let gone = demand::alight(&mut bus.cargo, si);
+                            bus.load = (bus.load - gone).max(0.0);
+                            // At the last stop of the loop nobody boards.
+                            let board = if idx == 0 {
+                                0.0
+                            } else {
+                                let space = (bus.capacity - bus.load).floor().max(0.0);
+                                let b = &mut *bus;
+                                demand::board(&mut queues, si, &mut b.cargo, space, &b.route, idx)
+                            };
                             bus.load += board;
                             earned += board as f64 * FARE;
                             eco.boarded += board as u64;
@@ -981,6 +1024,7 @@ fn move_buses(
                             bus.phase = Phase::Layover;
                             bus.since = clock.abs;
                             bus.load = 0.0;
+                            bus.cargo.clear();
                             break;
                         }
                         if bus.dwell > 0.0 {

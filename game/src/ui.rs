@@ -108,6 +108,7 @@ pub enum Action {
     LogoLoad,
     CompanyNext,
     UpdateDownload,
+    UpdateInstall,
     UpdateLater,
     ToggleUpdateCheck,
     ToggleDiscord,
@@ -1045,10 +1046,27 @@ pub fn update_tooltip(
         Some(i) => {
             let stop = &map.stops[i];
             let waiting = queues.waiting.get(i).copied().unwrap_or(0.0).floor();
+            let top = (|| {
+                let d = queues.dest.get(i)?;
+                let slots = queues.by_dest.get(i)?;
+                let (k, n) = slots.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
+                if *n < 1.0 {
+                    return None;
+                }
+                Some((map.stops.get(*d.get(k)?)?.name.clone(), n.floor() as i64))
+            })();
             text.0 = format!(
                 "{}\n{} waiting · demand {:.1}",
                 stop.name, waiting as i64, stop.demand
             );
+            if let Some((name, n)) = top {
+                let name = if name.is_empty() {
+                    "another stop".to_string()
+                } else {
+                    name
+                };
+                text.0 += &format!("\nMost want to go to {name} ({n})");
+            }
             node.display = Display::Flex;
             node.left = Val::Px((hover.cursor.x + 16.0).min(window.width() - 220.0).max(4.0));
             node.top = Val::Px((hover.cursor.y + 20.0).min(window.height() - 60.0).max(4.0));

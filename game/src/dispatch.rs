@@ -47,6 +47,8 @@ pub struct Bus {
     pub driver: u32,
     pub next: usize,
     pub load: f32,
+    /// Riders on board: (destination stop, how many).
+    pub cargo: Vec<(usize, f32)>,
     pub dwell: f32,
     pub capacity: f32,
     pub run_cost: f64,
@@ -169,6 +171,7 @@ pub fn spawn_bus(
             driver: driver_id,
             next: 1,
             load: 0.0,
+            cargo: Vec::new(),
             dwell: 0.0,
             capacity: spec.capacity,
             run_cost: spec.run_cost,

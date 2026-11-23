@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus Manager: run a bus company on real maps</title>
+<meta name="description" content="Bus Manager is a free bus company management game on real OpenStreetMap cities, built with Rust and Bevy for Windows, macOS and Linux.">
+<meta property="og:title" content="Bus Manager">
+<meta property="og:description" content="Run a bus company on the real map of your own city.">
+<meta property="og:image" content="https://busmanager.yoz-team.online/img/menu.jpg">
+<meta property="og:url" content="https://busmanager.yoz-team.online/">
+<link rel="icon" href="favicon.png">
+<style>
+:root{
+  --bg:#f4f7f1; --card:#ffffff; --ink:#1d2630; --muted:#5b6672; --line:#dde5da;
+  --green:#1f9d55; --green-d:#177a42; --navy:#1e2530; --orange:#f08a1c; --blue:#2f80d1;
+  --shadow:0 10px 30px rgba(20,40,30,.12);
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#141a21; --card:#1e2530; --ink:#eef2f6; --muted:#9aa6b2; --line:#2c3643; --shadow:0 10px 30px rgba(0,0,0,.4);}
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--green)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+header.top{position:absolute;inset:0 0 auto 0;z-index:5}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+nav a{color:#fff;text-decoration:none;margin-left:22px;font-weight:600;font-size:15px;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+nav a:hover{text-decoration:underline}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:800;text-decoration:none;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+.brand img{width:32px;height:32px;border-radius:8px}
+.hero{position:relative;min-height:640px;display:flex;align-items:center;color:#fff;background:#10161c;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-20px;background:url(img/menu.jpg) center/cover no-repeat;filter:blur(7px)}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,16,22,.6),rgba(10,16,22,.85))}
+.hero .wrap{position:relative;z-index:2;text-align:center;padding-top:80px;padding-bottom:40px}
+.hero img.logo{width:min(520px,86vw);height:auto}
+.hero h1{font-size:clamp(26px,4.2vw,40px);line-height:1.2;margin:14px 0 10px}
+.hero p.lead{font-size:clamp(17px,2.2vw,20px);max-width:680px;margin:0 auto 28px;color:#dbe6ee}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:13px 22px;border-radius:12px;font-weight:700;text-decoration:none;border:2px solid transparent;font-size:16px}
+.btn.primary{background:var(--green);color:#fff}
+.btn.primary:hover{background:var(--green-d)}
+.btn.ghost{border-color:rgba(255,255,255,.7);color:#fff}
+.btn.ghost:hover{background:rgba(255,255,255,.12)}
+.badge{display:inline-block;margin-top:18px;font-size:13px;color:#c9d6df;background:rgba(255,255,255,.12);padding:4px 12px;border-radius:99px}
+section{padding:72px 0}
+section h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px}
+section .sub{color:var(--muted);margin:0 0 36px;max-width:720px}
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow)}
+.card h3{margin:10px 0 6px;font-size:18px}
+.card p{margin:0;color:var(--muted);font-size:15px}
+.ico{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:#fff;font-weight:800}
+.shots{display:grid;gap:26px}
+.shot{display:grid;gap:22px;grid-template-columns:1.25fr 1fr;align-items:center}
+.shot:nth-child(even){grid-template-columns:1fr 1.25fr}
+.shot:nth-child(even) img{order:2}
+.shot img{width:100%;height:auto;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow);display:block}
+.shot h3{margin:0 0 6px;font-size:22px}
+.shot p{margin:0;color:var(--muted)}
+@media (max-width:760px){nav a:not(:last-child){display:none}.shot,.shot:nth-child(even){grid-template-columns:1fr}.shot:nth-child(even) img{order:0}nav a{margin-left:14px}}
+.dl{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.dl .card{text-align:center}
+.dl .btn{margin-top:14px;width:100%;justify-content:center}
+.dl small{display:block;color:var(--muted);margin-top:10px}
+.dl .card.me{border-color:var(--green);box-shadow:0 0 0 3px rgba(31,157,85,.22),var(--shadow)}
+.road{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.road li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;gap:12px;align-items:flex-start}
+.road .dot{flex:none;width:22px;height:22px;border-radius:50%;margin-top:2px;display:grid;place-items:center;font-size:13px;color:#fff;background:var(--line)}
+.road li.done .dot{background:var(--green)}
+.road li span{color:var(--muted)}
+.community{background:var(--navy);color:#fff}
+.community .sub{color:#b8c4cf}
+.community .btn.d{background:#5865F2;color:#fff}
+.community .btn.k{background:#FF5E5B;color:#fff}
+.community .btn.g{background:#2b3541;color:#fff;border-color:#3a4756}
+footer{padding:30px 0;color:var(--muted);font-size:14px;text-align:center}
+footer a{color:inherit}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="wrap">
+  <a class="brand" href="#"><img src="favicon.png" alt=""> Bus Manager</a>
+  <nav><a href="#features">Features</a><a href="#screens">Screenshots</a><a href="#download">Download</a><a href="#roadmap">Roadmap</a><a href="https://github.com/YOZTeam/BusManager">GitHub</a></nav>
+</div></header>
+
+<div class="hero"><div class="wrap">
+  <img class="logo" src="logo-outline.png" alt="Bus Manager">
+  <h1>Run a bus company on the real map of your city</h1>
+  <p class="lead">Download any city from OpenStreetMap, build a depot, buy buses, plan lines on real roads and keep your drivers and timetables in order. Free and open source.</p>
+  <div class="cta">
+    <a class="btn primary" href="#download" id="hero-dl">Download for your system</a>
+    <a class="btn ghost" href="https://github.com/YOZTeam/BusManager">View on GitHub</a>
+  </div>
+  <span class="badge" id="ver">Early development</span>
+</div></div>
+
+<section id="features"><div class="wrap">
+  <h2>What you can do</h2>
+  <p class="sub">A management game in the spirit of classic bus tycoons, with a real map under it.</p>
+  <div class="grid">
+    <div class="card"><div class="ico" style="background:var(--green)">M</div><h3>Real cities</h3><p>Search any place on Earth. Roads, parks, water and buildings come from OpenStreetMap, downloaded inside the game. Update a city to the latest map data at any time.</p></div>
+    <div class="card"><div class="ico" style="background:var(--blue)">L</div><h3>Plan your lines</h3><p>Click stops and waypoints on the map, or start from real OSM bus routes. Buses follow the real road network.</p></div>
+    <div class="card"><div class="ico" style="background:var(--orange)">D</div><h3>Build your depot</h3><p>Start with an empty lot. Place parking stands, expand the land and build a workshop, wash bay, fuel station and break room.</p></div>
+    <div class="card"><div class="ico" style="background:#8e24aa">P</div><h3>Passengers with destinations</h3><p>Riders pick where they want to go. Busy, nearby stops attract more of them and they only board buses that take them there.</p></div>
+    <div class="card"><div class="ico" style="background:#00897b">S</div><h3>Drivers and shifts</h3><p>Hire drivers for early, late and night shifts, set timetables and keep your fleet serviced and fuelled.</p></div>
+    <div class="card"><div class="ico" style="background:#d81b60">3D</div><h3>Four bus categories</h3><p>Minibuses, solo buses, double-deckers and articulated buses, each with their own models. Players can add their own buses.</p></div>
+  </div>
+</div></section>
+
+<section id="screens" style="background:var(--card);border-block:1px solid var(--line)"><div class="wrap">
+  <h2>Screenshots</h2>
+  <p class="sub">Work in progress builds from the game.</p>
+  <div class="shots">
+    <div class="shot"><img src="img/map.jpg" alt="Buses running a line on the city map" loading="lazy"><div><h3>The city map</h3><p>A clean OSM-style map with German H bus stops, a minimap, missions and live line statistics.</p></div></div>
+    <div class="shot"><img src="img/plan.jpg" alt="Route planning screen" loading="lazy"><div><h3>Route planning</h3><p>Pick stops in order, drop waypoints on roads and see the length and loop time before you open the line.</p></div></div>
+    <div class="shot"><img src="img/build.jpg" alt="Depot build panel" loading="lazy"><div><h3>Build your depot</h3><p>Buy and place parking stands, expand the lot step by step and add rooms that make running costs cheaper.</p></div></div>
+    <div class="shot"><img src="img/shop.jpg" alt="Fleet shop in the depot" loading="lazy"><div><h3>The fleet shop</h3><p>Choose a category, compare capacity and price and park your new bus on a stand you built yourself.</p></div></div>
+  </div>
+</div></section>
+
+<section id="download"><div class="wrap">
+  <h2>Download</h2>
+  <p class="sub">The installer can install, update, repair and uninstall the game. Once installed, the game also updates itself from its own menu.</p>
+  <div class="dl">
+    <div class="card" data-os="windows"><h3>Windows</h3><p>Windows 10 and newer</p><a class="btn primary" href="https://github.com/YOZTeam/BusManager/releases/latest">Get the installer</a><small>BusManager-Setup-windows.exe</small></div>
+    <div class="card" data-os="macos"><h3>macOS</h3><p>Apple silicon and Intel</p><a class="btn primary" href="https://github.com/YOZTeam/BusManager/releases/latest">Get the installer</a><small>BusManager-Setup-macos</small></div>
+    <div class="card" data-os="linux"><h3>Linux</h3><p>Ubuntu and other distributions</p><a class="btn primary" href="https://github.com/YOZTeam/BusManager/releases/latest">Get the installer</a><small>BusManager-Setup-linux</small></div>
+  </div>
+  <p class="sub" style="margin-top:22px">Want to build it yourself? <code>cargo run --release -p busmanager</code>. See the <a href="https://github.com/YOZTeam/BusManager#readme">README</a>.</p>
+</div></section>
+
+<section id="roadmap" style="background:var(--card);border-block:1px solid var(--line)"><div class="wrap">
+  <h2>Roadmap</h2>
+  <p class="sub">What is done and what is coming.</p>
+  <ul class="road">
+    <li class="done"><i class="dot">✓</i><div><b>Real maps, depot, 3D buses, planner, timetables</b><br><span>Done</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Company, game modes, save and load, updates</b><br><span>Casual, Realistic and Sandbox modes; in-game updater; Discord Rich Presence</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Depot v2 and passenger destinations</b><br><span>Build stands and rooms, riders with destinations</span></div></li>
+    <li><i class="dot"></i><div><b>Choose your depot location</b><br><span>Pick where your company starts on the map</span></div></li>
+    <li><i class="dot"></i><div><b>Researches</b><br><span>Unlock depot expansion and new service areas, even connecting several cities</span></div></li>
+    <li><i class="dot"></i><div><b>Own bus stations and waypoints</b><br><span>Build your own stops with a monthly cost instead of using the map's</span></div></li>
+    <li><i class="dot"></i><div><b>Better graphics</b><br><span>Lighting, materials, models and buildings</span></div></li>
+  </ul>
+</div></section>
+
+<section class="community"><div class="wrap">
+  <h2>Join the community</h2>
+  <p class="sub">Report bugs, share ideas, follow development and support the project.</p>
+  <div class="cta" style="justify-content:flex-start">
+    <a class="btn d" href="https://discord.gg/Ppx7u4g2Wt">Discord</a>
+    <a class="btn k" href="https://ko-fi.com/adamikhlef">Support on Ko-fi</a>
+    <a class="btn g" href="https://github.com/YOZTeam/BusManager/issues">Report an issue</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  Bus Manager by YOZ Team · Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · <a href="https://github.com/YOZTeam/BusManager/blob/main/LICENSE">License</a>
+</div></footer>
+
+<script>
+(function(){
+  var os = /Win/i.test(navigator.platform) ? "windows" : /Mac/i.test(navigator.platform) ? "macos" : "linux";
+  var mine = document.querySelector('[data-os="'+os+'"]');
+  if (mine) mine.classList.add("me");
+  var names = {windows:"windows", macos:"macos", linux:"linux"};
+  fetch("https://api.github.com/repos/YOZTeam/BusManager/releases?per_page=1")
+    .then(function(r){return r.ok ? r.json() : []})
+    .then(function(list){
+      var rel = list && list[0]; if(!rel) return;
+      document.getElementById("ver").textContent = "Latest version: " + rel.tag_name;
+      (rel.assets||[]).forEach(function(a){
+        Object.keys(names).forEach(function(k){
+          var card = document.querySelector('[data-os="'+k+'"]');
+          if (card && a.name.indexOf("BusManager-Setup-"+k) === 0) card.querySelector("a.btn").href = a.browser_download_url;
+        });
+      });
+      var m = document.querySelector('[data-os="'+os+'"] a.btn');
+      if (m) document.getElementById("hero-dl").href = m.href;
+    }).catch(function(){});
+})();
+</script>
+</body>
+</html>
