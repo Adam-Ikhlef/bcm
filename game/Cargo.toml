@@ -21,7 +21,7 @@ serde_json = "1"
 ureq = "2"
 dirs = "6"
 # Polygon triangulation for buildings, parks and water
-earcutr = "0.4"
+earcutr = "0.5"
 # Window icon
 winit = "0.30"
 # Discord Rich Presence (talks to the local Discord client; silently does nothing if Discord is closed)
