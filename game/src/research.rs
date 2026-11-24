@@ -5,7 +5,14 @@ use std::sync::{
     Mutex,
 };
 
-use bevy::{prelude::*, ui::FocusPolicy};
+use bevy::{
+    prelude::*,
+    render::{
+        render_asset::RenderAssetUsages,
+        render_resource::{Extent3d, TextureDimension, TextureFormat},
+    },
+    ui::FocusPolicy,
+};
 
 use crate::{
     net::{self, Place},
@@ -24,7 +31,11 @@ pub struct Tech {
     pub days: f64,
     /// Index of the tech that has to be finished first.
     pub needs: Option<usize>,
+    /// Index into `CATEGORIES`.
+    pub cat: usize,
 }
+
+pub const CATEGORIES: [&str; 3] = ["Depot", "Operations", "Growth"];
 
 pub const TECHS: [Tech; 7] = [
     Tech {
@@ -33,6 +44,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 3_000.0,
         days: 2.0,
         needs: None,
+        cat: 0,
     },
     Tech {
         name: "Lot expansion II",
@@ -40,6 +52,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 6_000.0,
         days: 4.0,
         needs: Some(0),
+        cat: 0,
     },
     Tech {
         name: "Efficient engines",
@@ -47,6 +60,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 3_500.0,
         days: 3.0,
         needs: None,
+        cat: 1,
     },
     Tech {
         name: "Driver training",
@@ -54,6 +68,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 4_000.0,
         days: 3.0,
         needs: None,
+        cat: 1,
     },
     Tech {
         name: "City marketing",
@@ -61,6 +76,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 5_000.0,
         days: 4.0,
         needs: None,
+        cat: 2,
     },
     Tech {
         name: "Service area I",
@@ -68,6 +84,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 10_000.0,
         days: 5.0,
         needs: Some(4),
+        cat: 2,
     },
     Tech {
         name: "Service area II",
@@ -75,6 +92,7 @@ pub const TECHS: [Tech; 7] = [
         cost: 18_000.0,
         days: 7.0,
         needs: Some(5),
+        cat: 2,
     },
 ];
 
@@ -91,6 +109,8 @@ pub struct Research {
     /// Tech being researched and the game minute it finishes.
     pub active: Option<(usize, f64)>,
     pub open: bool,
+    /// Selected category tab.
+    pub tab: usize,
     /// Bumped when anything changes (the UI rebuilds).
     pub version: u32,
 }
@@ -218,6 +238,10 @@ pub fn research_actions(
 ) {
     for UiAction(a) in events.read() {
         match *a {
+            Action::ResearchTab(t) => {
+                research.tab = t as usize;
+                research.version += 1;
+            }
             Action::FindCities => {
                 if research.city_slots() <= session.extra.len()
                     || matches!(exp.state, ExpState::Searching | ExpState::Downloading(_))
@@ -300,7 +324,235 @@ pub fn research_tick(
     }
 }
 
+// --- Thumbnails (drawn by the game) ---------------------------------------------------------------
+
+const TW: usize = 190;
+const TH: usize = 76;
+
+type Rgb = (u8, u8, u8);
+
+struct Cv(Vec<u8>);
+
+impl Cv {
+    fn new(top: Rgb, bottom: Rgb) -> Self {
+        let mut px = Vec::with_capacity(TW * TH * 4);
+        for y in 0..TH {
+            let t = y as f32 / (TH - 1) as f32;
+            let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) as u8;
+            for _ in 0..TW {
+                px.extend_from_slice(&[
+                    m(top.0, bottom.0),
+                    m(top.1, bottom.1),
+                    m(top.2, bottom.2),
+                    255,
+                ]);
+            }
+        }
+        Cv(px)
+    }
+
+    fn set(&mut self, x: i32, y: i32, c: Rgb) {
+        if x >= 0 && y >= 0 && (x as usize) < TW && (y as usize) < TH {
+            let i = (y as usize * TW + x as usize) * 4;
+            self.0[i..i + 3].copy_from_slice(&[c.0, c.1, c.2]);
+        }
+    }
+
+    /// Fills every pixel for which `inside` is true, within the given box.
+    fn fill(&mut self, b: (i32, i32, i32, i32), c: Rgb, inside: impl Fn(f32, f32) -> bool) {
+        for y in b.1.max(0)..b.3.min(TH as i32) {
+            for x in b.0.max(0)..b.2.min(TW as i32) {
+                if inside(x as f32 + 0.5, y as f32 + 0.5) {
+                    self.set(x, y, c);
+                }
+            }
+        }
+    }
+
+    fn rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, c: Rgb) {
+        self.fill((x0, y0, x1, y1), c, |_, _| true);
+    }
+
+    fn circle(&mut self, cx: f32, cy: f32, r: f32, c: Rgb) {
+        let b = (
+            (cx - r) as i32 - 1,
+            (cy - r) as i32 - 1,
+            (cx + r) as i32 + 2,
+            (cy + r) as i32 + 2,
+        );
+        self.fill(b, c, |x, y| (x - cx).powi(2) + (y - cy).powi(2) <= r * r);
+    }
+
+    fn tri(&mut self, a: (f32, f32), b: (f32, f32), c: (f32, f32), col: Rgb) {
+        let area = |p: (f32, f32), q: (f32, f32), r: (f32, f32)| {
+            (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0)
+        };
+        let bb = (
+            a.0.min(b.0).min(c.0) as i32,
+            a.1.min(b.1).min(c.1) as i32,
+            a.0.max(b.0).max(c.0) as i32 + 1,
+            a.1.max(b.1).max(c.1) as i32 + 1,
+        );
+        self.fill(bb, col, |x, y| {
+            let p = (x, y);
+            let (w0, w1, w2) = (area(b, c, p), area(c, a, p), area(a, b, p));
+            (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0) || (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0)
+        });
+    }
+
+    fn line(&mut self, a: (f32, f32), b: (f32, f32), w: f32, c: Rgb) {
+        let bb = (
+            (a.0.min(b.0) - w) as i32,
+            (a.1.min(b.1) - w) as i32,
+            (a.0.max(b.0) + w) as i32 + 1,
+            (a.1.max(b.1) + w) as i32 + 1,
+        );
+        self.fill(bb, c, |x, y| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((x - a.0) * dx + (y - a.1) * dy) / (dx * dx + dy * dy).max(0.001))
+                .clamp(0.0, 1.0);
+            let (px, py) = (a.0 + dx * t, a.1 + dy * t);
+            (x - px).powi(2) + (y - py).powi(2) <= (w / 2.0).powi(2)
+        });
+    }
+}
+
+fn plus_badge(cv: &mut Cv, x: f32, y: f32) {
+    cv.circle(x, y, 9.0, (0x3f, 0xc2, 0x6b));
+    cv.rect(
+        x as i32 - 5,
+        y as i32 - 1,
+        x as i32 + 5,
+        y as i32 + 1,
+        (255, 255, 255),
+    );
+    cv.rect(
+        x as i32 - 1,
+        y as i32 - 5,
+        x as i32 + 1,
+        y as i32 + 5,
+        (255, 255, 255),
+    );
+}
+
+fn city_block(cv: &mut Cv, x: i32, y: i32) {
+    cv.rect(x - 14, y - 12, x + 14, y + 14, (0xe8, 0xee, 0xf6));
+    cv.rect(x - 14, y - 12, x + 14, y - 6, (0xe2, 0x47, 0x5c));
+    for wx in [-8, 2] {
+        for wy in [0, 7] {
+            cv.rect(
+                x + wx,
+                y + wy - 3,
+                x + wx + 6,
+                y + wy + 2,
+                (0x4a, 0x8f, 0xd8),
+            );
+        }
+    }
+}
+
+/// Draws the picture of one research.
+fn draw_tech(i: usize) -> Vec<u8> {
+    let (top, bottom) = match TECHS[i].cat {
+        0 => ((0x2c, 0x46, 0x62), (0x3f, 0x6c, 0x92)),
+        1 => ((0x2a, 0x56, 0x44), (0x3f, 0x8c, 0x66)),
+        _ => ((0x45, 0x38, 0x6c), (0x6a, 0x58, 0xa4)),
+    };
+    let mut cv = Cv::new(top, bottom);
+    let white = (255, 255, 255);
+    match i {
+        0 | 1 => {
+            let (x0, x1, lines) = if i == 0 { (50, 140, 3) } else { (28, 162, 6) };
+            cv.rect(x0, 14, x1, 64, (0x3c, 0x42, 0x4e));
+            for k in 1..=lines {
+                let x = x0 + (x1 - x0) * k / (lines + 1);
+                cv.rect(x - 1, 20, x + 1, 58, white);
+            }
+            plus_badge(&mut cv, 150.0, 18.0);
+            if i == 1 {
+                plus_badge(&mut cv, 170.0, 18.0);
+            }
+        }
+        2 => {
+            let drop = (0x7a, 0xe6, 0xa8);
+            cv.circle(88.0, 46.0, 17.0, drop);
+            cv.tri((88.0, 8.0), (71.0, 40.0), (105.0, 40.0), drop);
+            cv.line((130.0, 20.0), (130.0, 54.0), 7.0, white);
+            cv.tri((118.0, 52.0), (142.0, 52.0), (130.0, 66.0), white);
+        }
+        3 => {
+            cv.circle(95.0, 66.0, 24.0, (0xdd, 0xe6, 0xf0));
+            cv.circle(95.0, 34.0, 11.0, (0xf2, 0xc9, 0xa0));
+            cv.tri((95.0, 6.0), (122.0, 17.0), (95.0, 26.0), (0x20, 0x26, 0x34));
+            cv.tri((95.0, 6.0), (68.0, 17.0), (95.0, 26.0), (0x20, 0x26, 0x34));
+            cv.line((122.0, 17.0), (122.0, 34.0), 2.0, (0xf2, 0xb1, 0x1f));
+        }
+        4 => {
+            for (k, h) in [14, 24, 36, 48].into_iter().enumerate() {
+                let x = 48 + k as i32 * 24;
+                cv.rect(x, 68 - h, x + 18, 68, (0xe6, 0xdd, 0xf7));
+            }
+            cv.line((44.0, 40.0), (138.0, 12.0), 4.0, (0xf2, 0xb1, 0x1f));
+            cv.tri(
+                (150.0, 8.0),
+                (126.0, 6.0),
+                (136.0, 26.0),
+                (0xf2, 0xb1, 0x1f),
+            );
+        }
+        _ => {
+            let road = (0x50, 0x56, 0x66);
+            if i == 5 {
+                cv.line((55.0, 40.0), (135.0, 40.0), 6.0, road);
+                for k in 0..6 {
+                    let x = 62 + k * 12;
+                    cv.rect(x, 39, x + 6, 41, (0xf2, 0xd2, 0x4a));
+                }
+                city_block(&mut cv, 50, 40);
+                city_block(&mut cv, 140, 40);
+            } else {
+                for (a, b) in [
+                    ((50.0, 52.0), (140.0, 52.0)),
+                    ((50.0, 52.0), (95.0, 22.0)),
+                    ((140.0, 52.0), (95.0, 22.0)),
+                ] {
+                    cv.line(a, b, 5.0, road);
+                }
+                city_block(&mut cv, 48, 52);
+                city_block(&mut cv, 142, 52);
+                city_block(&mut cv, 95, 24);
+            }
+        }
+    }
+    cv.0
+}
+
+#[derive(Resource, Default)]
+pub struct TechThumbs(Vec<Handle<Image>>);
+
+fn thumbs(t: &mut TechThumbs, images: &mut Assets<Image>) -> Vec<Handle<Image>> {
+    if t.0.is_empty() {
+        for i in 0..TECHS.len() {
+            let mut img = Image::new(
+                Extent3d {
+                    width: TW as u32,
+                    height: TH as u32,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                draw_tech(i),
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            img.sampler = bevy::image::ImageSampler::linear();
+            t.0.push(images.add(img));
+        }
+    }
+    t.0.clone()
+}
+
 /// Shows or hides the research window and keeps it up to date.
+#[allow(clippy::too_many_arguments)]
 pub fn research_ui(
     mut commands: Commands,
     fonts: Res<UiFonts>,
@@ -309,12 +561,13 @@ pub fn research_ui(
     eco: Res<Economy>,
     session: Res<Session>,
     exp: Res<Expansion>,
+    mut tt: Local<TechThumbs>,
+    mut images: ResMut<Assets<Image>>,
     existing: Query<Entity, With<ResearchModal>>,
     mut last: Local<Option<(u32, bool, u64, bool)>>,
 ) {
     let hour = (clock.abs / 60.0) as u64;
     let key = (research.version, research.open, hour, eco.money >= 3_000.0);
-    let _ = (&session, &exp);
     if *last == Some(key) {
         return;
     }
@@ -325,6 +578,7 @@ pub fn research_ui(
     if !research.open {
         return;
     }
+    let handles = thumbs(&mut tt, &mut images);
     let f = &*fonts;
     commands
         .spawn((
@@ -345,9 +599,9 @@ pub fn research_ui(
         .with_children(|root| {
             root.spawn((
                 Node {
-                    width: Val::Px(540.0),
+                    width: Val::Px(660.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
+                    row_gap: Val::Px(10.0),
                     padding: UiRect::all(Val::Px(18.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     ..default()
@@ -373,48 +627,101 @@ pub fn research_ui(
                     style::MUTED,
                     "One research at a time. It costs money up front and takes game days.",
                 ));
-                for (i, t) in TECHS.iter().enumerate() {
-                    let status = if research.done[i] {
-                        "Researched".to_string()
-                    } else if let Some((a, end)) = research.active.filter(|(a, _)| *a == i) {
-                        let _ = a;
-                        format!(
-                            "In progress: {:.1} days left",
-                            ((end - clock.abs) / 1440.0).max(0.0)
-                        )
-                    } else if let Some(n) = t.needs.filter(|n| !research.done[*n]) {
-                        format!("Needs: {}", TECHS[n].name)
-                    } else {
-                        format!("{} days", t.days)
-                    };
-                    p.spawn((
-                        Node {
-                            align_items: AlignItems::Center,
+                p.spawn(Node {
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (i, c) in CATEGORIES.iter().enumerate() {
+                        let kind = if research.tab == i {
+                            BtnKind::Primary
+                        } else {
+                            BtnKind::Small
+                        };
+                        row.spawn(button(f, *c, Action::ResearchTab(i as u8), kind));
+                    }
+                });
+                p.spawn(crate::ui::scroll_box(1, Val::Px(300.0), 10.0))
+                    .with_children(|sc| {
+                        sc.spawn(Node {
+                            flex_wrap: FlexWrap::Wrap,
+                            flex_shrink: 0.0,
+                            align_content: AlignContent::FlexStart,
                             column_gap: Val::Px(10.0),
-                            padding: UiRect::all(Val::Px(7.0)),
+                            row_gap: Val::Px(10.0),
                             ..default()
-                        },
-                        BackgroundColor(style::INPUT),
-                        BorderRadius::all(Val::Px(10.0)),
-                        children![(
-                            Node {
-                                flex_grow: 1.0,
-                                flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(2.0),
-                                ..default()
-                            },
-                            children![
-                                text(f, true, 15.0, style::TEXT, t.name),
-                                text(f, false, 12.0, style::MUTED, t.blurb),
-                                text(f, false, 12.0, style::ACCENT, status),
-                            ]
-                        ),],
-                    ))
-                    .with_children(|row| research_button(row, f, &research, i));
+                        })
+                        .with_children(|grid| {
+                            for (i, t) in TECHS.iter().enumerate() {
+                                if t.cat == research.tab {
+                                    tech_card(grid, f, &research, &clock, i, handles[i].clone());
+                                }
+                            }
+                        });
+                    });
+                if research.tab == 2 {
+                    cities_section(p, f, &research, &session, &exp);
                 }
-                cities_section(p, f, &research, &session, &exp);
             });
         });
+}
+
+fn tech_card(
+    grid: &mut ChildSpawnerCommands,
+    f: &UiFonts,
+    research: &Research,
+    clock: &GameClock,
+    i: usize,
+    thumb: Handle<Image>,
+) {
+    let t = &TECHS[i];
+    let done = research.done[i];
+    let status = if done {
+        "Researched".to_string()
+    } else if let Some((_, end)) = research.active.filter(|(a, _)| *a == i) {
+        format!(
+            "In progress: {:.1} days left",
+            ((end - clock.abs) / 1440.0).max(0.0)
+        )
+    } else if let Some(n) = t.needs.filter(|n| !research.done[*n]) {
+        format!("Needs: {}", TECHS[n].name)
+    } else {
+        format!("{} days", t.days)
+    };
+    grid.spawn((
+        Node {
+            width: Val::Px(196.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(style::INPUT),
+        BorderColor(if done {
+            style::ACCENT
+        } else {
+            style::PANEL_BORDER
+        }),
+        BorderRadius::all(Val::Px(10.0)),
+    ))
+    .with_children(|c| {
+        c.spawn((
+            Node {
+                width: Val::Px(178.0),
+                height: Val::Px(178.0 * TH as f32 / TW as f32),
+                ..default()
+            },
+            ImageNode::new(thumb),
+        ));
+        c.spawn(text(f, true, 14.0, style::TEXT, t.name));
+        c.spawn(text(f, false, 11.0, style::MUTED, t.blurb));
+        c.spawn((
+            Node::default(),
+            children![text(f, false, 11.0, style::ACCENT, status)],
+        ));
+        research_button(c, f, research, i);
+    });
 }
 
 fn cities_section(

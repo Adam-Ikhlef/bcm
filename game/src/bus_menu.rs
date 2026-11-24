@@ -408,11 +408,12 @@ pub fn body(
         }
     });
     let free = fleet.stand_count().saturating_sub(fleet.buses.len());
-    match st.tab {
-        0 => owned(p, f, fleet, catalog, thumbs, images),
-        1 => new_buses(p, f, catalog, st, cat, free, thumbs, images),
-        _ => second_hand(p, f, catalog, market, free, thumbs, images),
-    }
+    p.spawn(crate::ui::scroll_box(10 + st.tab, Val::Vh(52.0), 6.0))
+        .with_children(|p| match st.tab {
+            0 => owned(p, f, fleet, catalog, thumbs, images),
+            1 => new_buses(p, f, catalog, st, cat, free, thumbs, images),
+            _ => second_hand(p, f, catalog, market, free, thumbs, images),
+        });
 }
 
 fn owned(

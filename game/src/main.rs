@@ -19,6 +19,7 @@ mod settings;
 mod sidebar;
 mod site;
 mod staffui;
+mod stations;
 mod style;
 mod ui;
 mod update;
@@ -272,6 +273,8 @@ fn main() {
     .init_resource::<ui::MissionsOpen>()
     .init_resource::<research::Research>()
     .init_resource::<research::Expansion>()
+    .init_resource::<ui::ScrollMem>()
+    .init_resource::<stations::Stations>()
     .init_resource::<bus_menu::BuyState>()
     .init_resource::<bus_menu::Market>()
     .init_resource::<bus_menu::Thumbs>()
@@ -342,6 +345,7 @@ fn main() {
             ui::ui_toggles,
             ui::panel_toggles,
             ui::lines_panel_visibility,
+            ui::scroll_boxes,
         )
             .chain(),
     )
@@ -432,6 +436,9 @@ fn main() {
                 site::guard_view,
                 bus_menu::refresh_market,
                 (
+                    stations::station_actions,
+                    stations::station_click,
+                    stations::station_preview,
                     research::research_actions,
                     research::research_tick,
                     research::expansion_poll,
@@ -477,6 +484,7 @@ fn init_game(
     cam: Single<(&mut Transform, &mut Projection), With<MapCamera>>,
 ) {
     commands.insert_resource(research::Research::default());
+    commands.insert_resource(stations::Stations::default());
     commands.insert_resource(StopQueues::new(&map.stops));
     commands.insert_resource(DestWeights(
         demand::build(&map.stops)
@@ -698,6 +706,9 @@ fn hotkeys(
     if *view == View::Map {
         if keys.just_pressed(KeyCode::KeyN) && *tool == Tool::Idle {
             events.write(UiAction(Action::NewLine));
+        }
+        if keys.just_pressed(KeyCode::KeyB) && *tool == Tool::Idle {
+            events.write(UiAction(Action::ToggleStation));
         }
         if keys.just_pressed(KeyCode::Enter) && *tool == Tool::Drawing {
             events.write(UiAction(Action::Finish));

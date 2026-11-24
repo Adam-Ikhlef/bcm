@@ -97,6 +97,8 @@ pub enum Action {
     ToggleResearch,
     StartResearch(u8),
     FindCities,
+    ToggleStation,
+    ResearchTab(u8),
     PickCity(u8),
     BusTab(u8),
     Qty(i8),
@@ -896,6 +898,7 @@ pub fn spawn_game_ui(
                     },
                     children![
                         button(f, "New line  (N)", Action::NewLine, BtnKind::Primary),
+                        button(f, "Station  (B)", Action::ToggleStation, BtnKind::Small),
                         text(
                             f,
                             false,
@@ -1176,6 +1179,7 @@ fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
         Action::OpenPanel(1) => "Build in the depot",
         Action::ToggleLines => "Lines",
         Action::ToggleResearch => "Research",
+        Action::ToggleStation => "Build your own bus station on a road",
         Action::Menu => "Menu",
         Action::Finish => "Finish the line",
         Action::Cancel => "Cancel",
@@ -1258,5 +1262,76 @@ pub fn update_toast(
     }
     if show && text.0 != eco.msg {
         text.0 = eco.msg.clone();
+    }
+}
+
+// --- Scrolling lists ----------------------------------------------------------------------------
+
+/// A vertically scrolling box; the number identifies it so its position survives UI rebuilds.
+#[derive(Component)]
+pub struct ScrollBox(pub u8);
+
+#[derive(Resource, Default)]
+pub struct ScrollMem(pub std::collections::HashMap<u8, f32>);
+
+/// Node bundle for a scrolling list of at most `max_height` pixels.
+pub fn scroll_box(id: u8, max_height: Val, gap: f32) -> impl Bundle {
+    (
+        ScrollBox(id),
+        ScrollPosition::default(),
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(gap),
+            max_height,
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    )
+}
+
+/// Mouse wheel scrolls the box under the cursor (and remembers where it was).
+pub fn scroll_boxes(
+    mut wheel: EventReader<bevy::input::mouse::MouseWheel>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut boxes: Query<(
+        &ScrollBox,
+        &mut ScrollPosition,
+        &ComputedNode,
+        &GlobalTransform,
+    )>,
+    mut mem: ResMut<ScrollMem>,
+    fresh: Query<(&ScrollBox, Entity), Added<ScrollBox>>,
+    mut commands: Commands,
+) {
+    // Restore positions of freshly rebuilt boxes.
+    for (b, e) in &fresh {
+        if let Some(&y) = mem.0.get(&b.0) {
+            commands.entity(e).insert(ScrollPosition {
+                offset_x: 0.0,
+                offset_y: y,
+            });
+        }
+    }
+    let Some(cursor) = window.physical_cursor_position() else {
+        wheel.clear();
+        return;
+    };
+    for ev in wheel.read() {
+        let dy = match ev.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => ev.y * 36.0,
+            bevy::input::mouse::MouseScrollUnit::Pixel => ev.y,
+        };
+        for (b, mut pos, node, gt) in &mut boxes {
+            let half = node.size() / 2.0;
+            let c = gt.translation().truncate();
+            if (cursor.x - c.x).abs() <= half.x && (cursor.y - c.y).abs() <= half.y {
+                // Logical pixels; the layout clamps the far end.
+                let max =
+                    ((node.content_size().y - node.size().y) * node.inverse_scale_factor).max(0.0);
+                pos.offset_y = (pos.offset_y - dy).clamp(0.0, max);
+                mem.0.insert(b.0, pos.offset_y);
+                break;
+            }
+        }
     }
 }

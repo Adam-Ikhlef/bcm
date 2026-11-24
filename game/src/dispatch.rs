@@ -78,6 +78,7 @@ pub fn daily_rollover(
     session: Res<crate::save::Session>,
     fleet: Res<crate::fleet::Fleet>,
     research: Res<crate::research::Research>,
+    stations: Res<crate::stations::Stations>,
 ) {
     let day = clock.day();
     if day <= clock.last_day {
@@ -91,7 +92,12 @@ pub fn daily_rollover(
     };
     let wages =
         staff.daily_wages() * session.mode.wage_factor() * break_room * research.wage_mult();
-    let upkeep = fleet.upkeep()
+    let monthly = if (day + 1) % 30 == 0 {
+        stations.monthly_cost()
+    } else {
+        0.0
+    };
+    let upkeep = (fleet.upkeep() + monthly)
         * if session.mode.wage_factor() > 0.0 {
             1.0
         } else {
@@ -111,7 +117,7 @@ pub fn daily_rollover(
             fmt_money(wages),
             staff.drivers.len(),
             if upkeep > 0.0 {
-                format!(" and {} room upkeep", fmt_money(upkeep))
+                format!(" and {} upkeep", fmt_money(upkeep))
             } else {
                 String::new()
             }

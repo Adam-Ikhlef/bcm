@@ -15,7 +15,7 @@ use crate::{
     style, Bus, GameWorld, Lines, StopQueues, MAX_WAITING,
 };
 
-const ICON_PX: f32 = 24.0; // base sprite size of the H icon (screen pixels at zoom scale 1)
+pub const ICON_PX: f32 = 24.0; // base sprite size of the H icon (screen pixels at zoom scale 1)
 
 // --- Road style (OSM standard colors) ---------------------------------------
 
@@ -461,29 +461,7 @@ pub struct StopBadge;
 
 pub fn spawn_stops(mut commands: Commands, map: Res<MapData>, icons: Res<Icons>) {
     for (i, s) in map.stops.iter().enumerate() {
-        commands
-            .spawn((
-                StopMarker(i),
-                Sprite {
-                    image: icons.stop.clone(),
-                    custom_size: Some(Vec2::splat(ICON_PX)),
-                    ..default()
-                },
-                Transform::from_translation(s.pos.extend(3.0)),
-                GameWorld,
-            ))
-            .with_children(|p| {
-                p.spawn((
-                    StopBadge,
-                    Sprite {
-                        image: icons.badge.clone(),
-                        custom_size: Some(Vec2::splat(10.0)),
-                        ..default()
-                    },
-                    Transform::from_xyz(8.0, 8.0, 0.1),
-                    Visibility::Hidden,
-                ));
-            });
+        crate::stations::spawn_marker(&mut commands, i, s.pos, &icons);
     }
 }
 

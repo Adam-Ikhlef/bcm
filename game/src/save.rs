@@ -181,6 +181,9 @@ pub struct SaveData {
     /// Finished research (by `research::TECHS` index); empty in older saves.
     #[serde(default)]
     research_done: Vec<bool>,
+    /// Own bus stations: (x, y, name), in build order.
+    #[serde(default)]
+    stations: Vec<(f32, f32, String)>,
     /// Research in progress: (tech, finishing game minute).
     #[serde(default)]
     research_active: Option<(usize, f64)>,
@@ -328,6 +331,10 @@ pub fn collect(world: &World) -> Option<SaveData> {
         lot_level: fleet.lot_level,
         rooms: Vec::new(),
         research_done: research.done.to_vec(),
+        stations: world
+            .get_resource::<crate::stations::Stations>()
+            .map(|s| s.own.iter().map(|(p, n)| (p.x, p.y, n.clone())).collect())
+            .unwrap_or_default(),
         research_active: research.active,
         placed: Some(
             fleet
@@ -383,7 +390,8 @@ pub fn apply_pending_load(world: &mut World) {
     let Some(data) = world.resource_mut::<PendingLoad>().0.take() else {
         return;
     };
-    let map = world.remove_resource::<MapData>().expect("map");
+    let mut map = world.remove_resource::<MapData>().expect("map");
+    crate::stations::restore(world, &mut map, &data.stations);
     let mut depot = *world.resource::<crate::ops::DepotSite>();
     if let Some((x, y)) = data.depot {
         if let Some((node, pos)) = map.nearest_node(Vec2::new(x, y), 100.0) {
