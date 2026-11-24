@@ -88,7 +88,7 @@ Optional: `busmanager path/to/city.osm.pbf` loads a local extract.
 | "Timetable" in the Lines panel | First/last departure, interval and bus count; shows today's departures |
 | Esc | Cancel |
 | "+ Bus" in the Lines panel | Add a bus to that line |
-| Space, 1 / 2 / 3 | Pause, speed 1x / 4x / 10x |
+| Space, 1 / 2 / 3 | Pause, speed x1 / x2 / x3 (1 game hour = 6 real minutes at x1) |
 | Tab or Map/Depot buttons | Switch between map and 3D depot |
 | Staff button | Hire and fire drivers |
 
@@ -178,6 +178,8 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [x] **Multi-city research**: "Service area I/II" researches let you add neighbouring cities; all cities load into one big map with merged road networks and a single depot
 - [x] Graphics API option (Automatic, Vulkan, DirectX 12) with automatic fallback if it fails to start
 - [x] Day/night cycle in the depot (moving sun, dusk colours, lit lamps and windows)
+- [x] Map look: varied building colours with soft shadows, night tint on the map
+- [x] Game pace: 1 game hour = 6 real minutes, speeds x1 / x2 / x3
 - [x] Sandbox: researches finish instantly
 - [x] Own bus stations: place stops on any road (B), build cost + monthly upkeep, saved with the game
 - [x] Research menu with categories, picture cards and scrolling (bus menu lists scroll too)

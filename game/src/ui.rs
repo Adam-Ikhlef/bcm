@@ -602,9 +602,9 @@ pub fn spawn_game_ui(
                         },
                         children![
                             button(f, "II", Action::Pause, BtnKind::Toggle),
-                            button(f, "1x", Action::Speed(1), BtnKind::Toggle),
-                            button(f, "4x", Action::Speed(4), BtnKind::Toggle),
-                            button(f, "10x", Action::Speed(10), BtnKind::Toggle),
+                            button(f, "x1", Action::Speed(1), BtnKind::Toggle),
+                            button(f, "x2", Action::Speed(2), BtnKind::Toggle),
+                            button(f, "x3", Action::Speed(3), BtnKind::Toggle),
                         ]
                     ),]
                 ),

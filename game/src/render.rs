@@ -270,6 +270,7 @@ fn area_z(kind: AreaKind) -> f32 {
 fn build_area_mesh(map: &MapData, kind: AreaKind) -> Mesh {
     let mut positions: Vec<[f32; 3]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
+    let mut colors: Vec<[f32; 4]> = Vec::new();
     for area in map.areas.iter().filter(|a| a.kind == kind) {
         let flat: Vec<f64> = area
             .pts
@@ -281,6 +282,10 @@ fn build_area_mesh(map: &MapData, kind: AreaKind) -> Mesh {
         };
         let base = positions.len() as u32;
         positions.extend(area.pts.iter().map(|p| [p.x, p.y, 0.0]));
+        if kind == AreaKind::Building {
+            let c = building_tint(area.pts[0]);
+            colors.extend(area.pts.iter().map(|_| c));
+        }
         indices.extend(tris.into_iter().map(|i| base + i as u32));
     }
     let mut mesh = Mesh::new(
@@ -288,8 +293,34 @@ fn build_area_mesh(map: &MapData, kind: AreaKind) -> Mesh {
         RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    if !colors.is_empty() {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    }
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+/// Every building gets its own soft colour (deterministic from where it stands).
+fn building_tint(p: Vec2) -> [f32; 4] {
+    const PALETTE: [[u8; 3]; 6] = [
+        [0xa9, 0xb4, 0xc6],
+        [0xc9, 0xb8, 0xa4],
+        [0xb9, 0xa9, 0xb8],
+        [0xb4, 0xbf, 0xa8],
+        [0xd0, 0xc4, 0x9a],
+        [0x9e, 0xa8, 0xb4],
+    ];
+    let h = ((p.x * 12.9898 + p.y * 78.233).sin() * 43758.547)
+        .fract()
+        .abs();
+    let c = PALETTE[(h * PALETTE.len() as f32) as usize % PALETTE.len()];
+    let j = 0.94 + 0.12 * ((h * 91.7).fract());
+    [
+        c[0] as f32 / 255.0 * j,
+        c[1] as f32 / 255.0 * j,
+        c[2] as f32 / 255.0 * j,
+        1.0,
+    ]
 }
 
 pub fn spawn_areas(
@@ -302,14 +333,30 @@ pub fn spawn_areas(
         if !map.areas.iter().any(|a| a.kind == kind) {
             continue;
         }
+        let mesh = meshes.add(build_area_mesh(&map, kind));
+        let colour = if kind == AreaKind::Building {
+            Color::WHITE // the buildings carry their own colours
+        } else {
+            area_color(kind)
+        };
         let mut e = commands.spawn((
-            Mesh2d(meshes.add(build_area_mesh(&map, kind))),
-            MeshMaterial2d(materials.add(ColorMaterial::from(area_color(kind)))),
+            Mesh2d(mesh.clone()),
+            MeshMaterial2d(materials.add(ColorMaterial::from(colour))),
             Transform::from_xyz(0.0, 0.0, area_z(kind)),
             GameWorld,
         ));
         if kind == AreaKind::Building {
             e.insert(BuildingLayer);
+            // A soft shadow to the south-east gives the houses some depth when zoomed in.
+            commands.spawn((
+                Mesh2d(mesh),
+                MeshMaterial2d(
+                    materials.add(ColorMaterial::from(Color::srgba(0.1, 0.12, 0.2, 0.28))),
+                ),
+                Transform::from_xyz(3.0, -3.0, area_z(kind) - 0.5),
+                BuildingLayer,
+                GameWorld,
+            ));
         }
     }
 }
@@ -532,4 +579,39 @@ pub fn draw_routes(mut gizmos: Gizmos, lines: Res<Lines>) {
             c,
         );
     }
+}
+
+// --- Night tint -----------------------------------------------------------------------
+
+#[derive(Component)]
+pub struct NightOverlay;
+
+/// A dark blue veil over the map (below buses and stops) that follows the game clock.
+#[allow(clippy::too_many_arguments)]
+pub fn night_tint(
+    mut commands: Commands,
+    cam: Single<(Entity, &Projection), With<MapCamera>>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    clock: Option<Res<crate::ops::GameClock>>,
+    state: Res<State<crate::AppState>>,
+    mut overlay: Query<&mut Sprite, With<NightOverlay>>,
+) {
+    let (cam_e, proj) = *cam;
+    let Ok(mut sprite) = overlay.single_mut() else {
+        commands.entity(cam_e).with_children(|c| {
+            c.spawn((
+                NightOverlay,
+                Sprite::from_color(Color::NONE, Vec2::splat(10.0)),
+                // The camera sits at z = 1000; this puts the veil at z = 1.5.
+                Transform::from_xyz(0.0, 0.0, -998.5),
+            ));
+        });
+        return;
+    };
+    let night = match (&clock, **state == crate::AppState::Playing) {
+        (Some(c), true) => crate::depot::daylight(c.minute_of_day() as f32 / 60.0).night,
+        _ => 0.0,
+    };
+    sprite.color = Color::srgba(0.04, 0.07, 0.22, 0.46 * night);
+    sprite.custom_size = Some(window.size() * crate::ortho_scale(proj) * 1.3);
 }

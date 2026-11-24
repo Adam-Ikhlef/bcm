@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 /// Game seconds that pass per second of (virtual) real time.
-pub const TIME_SCALE: f32 = 3.0;
+pub const TIME_SCALE: f32 = 10.0;
 pub const MIN_PER_DAY: f64 = 1440.0;
 /// The game starts at 05:30 on day 1.
 pub const START_MINUTE: f64 = 5.0 * 60.0 + 30.0;

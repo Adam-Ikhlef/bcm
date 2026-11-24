@@ -45,10 +45,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // --- Economy tuning ---------------------------------------------------------
 const START_MONEY: f64 = 18_000.0;
-pub const BUS_SPEED: f32 = 11.0; // m/s
+pub const BUS_SPEED: f32 = 36.0; // m/s on the map (game pace: 1 game hour = 6 real minutes)
 const FARE: f64 = 1.5;
 const DWELL_SECONDS: f32 = 3.0;
-const PASSENGER_RATE: f32 = 0.12; // passengers per second per unit of stop demand
+const PASSENGER_RATE: f32 = 0.4; // passengers per real second per unit of stop demand (1 game hour = 6 real minutes)
 const CLEAN_LOSS_PER_RIDER: f32 = 0.03; // percent
 pub const MAX_WAITING: f32 = 60.0;
 
@@ -419,6 +419,7 @@ fn main() {
                 planner::rebuild_planner,
                 render::update_roads,
                 render::update_buildings,
+                render::night_tint,
                 render::update_stop_icons,
                 render::update_bus_scale,
                 render::draw_routes,
@@ -741,10 +742,10 @@ fn hotkeys(
         events.write(UiAction(Action::Speed(1)));
     }
     if keys.just_pressed(KeyCode::Digit2) {
-        events.write(UiAction(Action::Speed(4)));
+        events.write(UiAction(Action::Speed(2)));
     }
     if keys.just_pressed(KeyCode::Digit3) {
-        events.write(UiAction(Action::Speed(10)));
+        events.write(UiAction(Action::Speed(3)));
     }
 }
 
