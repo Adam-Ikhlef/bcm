@@ -494,6 +494,20 @@ fn options_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, s: &Settings) {
         option_row(
             p,
             f,
+            "Graphics API",
+            "Change only if the game does not start or looks broken. Needs a restart",
+            |c| {
+                c.spawn(button(
+                    f,
+                    crate::settings::API_NAMES[s.graphics_api as usize % 3],
+                    Action::CycleApi,
+                    BtnKind::Small,
+                ));
+            },
+        );
+        option_row(
+            p,
+            f,
             "Interface size",
             "Makes the menus and panels bigger or smaller",
             |c| {
@@ -762,6 +776,11 @@ fn menu_actions(
             }
             Action::ToggleVsync => {
                 settings.vsync = !settings.vsync;
+                settings.save();
+            }
+            Action::CycleApi => {
+                settings.graphics_api = settings.next_api();
+                settings.graphics_trying = false;
                 settings.save();
             }
             Action::OpenLink(i) => {

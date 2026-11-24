@@ -253,15 +253,30 @@ fn main() {
         );
     }
 
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Bus Manager".into(),
-            resolution: (1280.0_f32, 760.0_f32).into(),
+    let start_settings = settings::Settings::load_for_start();
+    let render = bevy::render::RenderPlugin {
+        render_creation: bevy::render::settings::WgpuSettings {
+            backends: start_settings
+                .backends()
+                .or(bevy::render::settings::WgpuSettings::default().backends),
             ..default()
-        }),
+        }
+        .into(),
         ..default()
-    }))
-    .insert_resource(settings::Settings::load())
+    };
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Bus Manager".into(),
+                    resolution: (1280.0_f32, 760.0_f32).into(),
+                    ..default()
+                }),
+                ..default()
+            })
+            .set(render),
+    )
+    .insert_resource(start_settings)
     .insert_resource(ClearColor(style::MAP_BG))
     .insert_resource(Catalog(specs))
     .init_resource::<Lines>()
@@ -342,6 +357,7 @@ fn main() {
             ui::emit_actions,
             ui::track_ui_block,
             settings::apply_settings,
+            settings::confirm_graphics,
             ui::ui_toggles,
             ui::panel_toggles,
             ui::lines_panel_visibility,

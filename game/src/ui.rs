@@ -91,6 +91,7 @@ pub enum Action {
     Exit,
     ToggleFullscreen,
     ToggleVsync,
+    CycleApi,
     UiScaleStep(i32),
     ToggleLines,
     ToggleMissions,

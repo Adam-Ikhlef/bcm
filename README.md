@@ -176,6 +176,8 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
 - [x] **Multi-city research**: "Service area I/II" researches let you add neighbouring cities; all cities load into one big map with merged road networks and a single depot
+- [x] Graphics API option (Automatic, Vulkan, DirectX 12) with automatic fallback if it fails to start
+- [x] Sandbox: researches finish instantly
 - [x] Own bus stations: place stops on any road (B), build cost + monthly upkeep, saved with the game
 - [x] Research menu with categories, picture cards and scrolling (bus menu lists scroll too)
 - [ ] **External depots research** (idea): more than one depot, also in the same city

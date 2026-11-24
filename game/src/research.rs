@@ -297,6 +297,13 @@ pub fn research_actions(
                     );
                     continue;
                 }
+                if session.mode == crate::save::GameMode::Sandbox {
+                    // Sandbox: no cost, no waiting.
+                    research.done[i] = true;
+                    research.version += 1;
+                    eco.say(&real, format!("Research finished: {}", t.name));
+                    continue;
+                }
                 eco.money -= t.cost;
                 eco.costs += t.cost;
                 research.active = Some((i, clock.abs + t.days * 1440.0));
@@ -654,7 +661,15 @@ pub fn research_ui(
                         .with_children(|grid| {
                             for (i, t) in TECHS.iter().enumerate() {
                                 if t.cat == research.tab {
-                                    tech_card(grid, f, &research, &clock, i, handles[i].clone());
+                                    tech_card(
+                                        grid,
+                                        f,
+                                        &research,
+                                        &clock,
+                                        session.mode == crate::save::GameMode::Sandbox,
+                                        i,
+                                        handles[i].clone(),
+                                    );
                                 }
                             }
                         });
@@ -671,6 +686,7 @@ fn tech_card(
     f: &UiFonts,
     research: &Research,
     clock: &GameClock,
+    instant: bool,
     i: usize,
     thumb: Handle<Image>,
 ) {
@@ -685,6 +701,8 @@ fn tech_card(
         )
     } else if let Some(n) = t.needs.filter(|n| !research.done[*n]) {
         format!("Needs: {}", TECHS[n].name)
+    } else if instant {
+        "Instant (Sandbox)".to_string()
     } else {
         format!("{} days", t.days)
     };

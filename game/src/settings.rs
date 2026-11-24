@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     pub fullscreen: bool,
     pub vsync: bool,
+    /// Graphics API: 0 automatic, 1 Vulkan, 2 DirectX 12 (Windows). Needs a restart.
+    pub graphics_api: u8,
+    /// Set while a non-automatic API is being tried; still set at the next start = it failed.
+    pub graphics_trying: bool,
     /// Size of the interface, 0.75 ..= 1.5.
     pub ui_scale: f32,
     /// Look for a newer release on every launch.
@@ -27,6 +31,8 @@ impl Default for Settings {
         Self {
             fullscreen: false,
             vsync: true,
+            graphics_api: 0,
+            graphics_trying: false,
             ui_scale: 1.0,
             check_updates: true,
             discord_presence: true,
@@ -40,7 +46,40 @@ fn path() -> Option<std::path::PathBuf> {
     dirs::config_dir().map(|d| d.join("BusManager").join("settings.json"))
 }
 
+pub const API_NAMES: [&str; 3] = ["Automatic", "Vulkan", "DirectX 12"];
+
 impl Settings {
+    /// Settings at program start. A graphics API that did not start last time is dropped.
+    pub fn load_for_start() -> Self {
+        let mut s = Self::load();
+        if s.graphics_trying {
+            s.graphics_api = 0;
+            s.graphics_trying = false;
+            s.save();
+        }
+        if s.graphics_api != 0 {
+            s.graphics_trying = true;
+            s.save();
+        }
+        s
+    }
+
+    /// wgpu backends for the chosen API (`None` = let wgpu pick, the default).
+    pub fn backends(&self) -> Option<bevy::render::settings::Backends> {
+        use bevy::render::settings::Backends;
+        match self.graphics_api {
+            1 => Some(Backends::VULKAN),
+            2 if cfg!(windows) => Some(Backends::DX12),
+            _ => None,
+        }
+    }
+
+    /// Next choice for the options button (DirectX 12 only exists on Windows).
+    pub fn next_api(&self) -> u8 {
+        let max = if cfg!(windows) { 3 } else { 2 };
+        (self.graphics_api + 1) % max
+    }
+
     pub fn load() -> Self {
         let mut s: Settings = path()
             .and_then(|p| std::fs::read_to_string(p).ok())
@@ -63,6 +102,18 @@ impl Settings {
 
     pub fn ui_percent(&self) -> i32 {
         (self.ui_scale * 100.0).round() as i32
+    }
+}
+
+/// Called once the first frame ran: the chosen graphics API works.
+pub fn confirm_graphics(mut settings: ResMut<Settings>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    *done = true;
+    if settings.graphics_trying {
+        settings.bypass_change_detection().graphics_trying = false;
+        settings.save();
     }
 }
 
@@ -99,5 +150,15 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"fullscreen":true}"#).unwrap();
         assert!(s.fullscreen && s.vsync);
         assert_eq!(s.ui_scale, 1.0);
+    }
+
+    #[test]
+    fn failed_graphics_api_falls_back_to_automatic() {
+        let mut s = Settings::default();
+        s.graphics_api = 1;
+        assert!(s.backends().is_some());
+        s.graphics_api = 0;
+        assert!(s.backends().is_none());
+        assert_eq!(Settings::default().next_api(), 1);
     }
 }
