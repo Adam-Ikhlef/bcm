@@ -13,6 +13,7 @@ mod osm;
 mod planner;
 mod presence;
 mod render;
+mod research;
 mod save;
 mod settings;
 mod sidebar;
@@ -466,6 +467,7 @@ fn init_game(
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&mut Transform, &mut Projection), With<MapCamera>>,
 ) {
+    commands.insert_resource(research::Research::default());
     commands.insert_resource(StopQueues::new(&map.stops));
     commands.insert_resource(DestWeights(
         demand::build(&map.stops)
@@ -891,6 +893,7 @@ fn spawn_passengers(
     map: Res<MapData>,
     mut queues: ResMut<StopQueues>,
     weights: Res<DestWeights>,
+    research: Res<research::Research>,
 ) {
     let dt = time.delta_secs();
     let tod = ops::demand_factor(clock.minute_of_day());
@@ -898,7 +901,7 @@ fn spawn_passengers(
         let (Some(slots), Some(w)) = (queues.by_dest.get_mut(i), weights.0.get(i)) else {
             continue;
         };
-        let new = s.demand * PASSENGER_RATE * tod * dt;
+        let new = s.demand * PASSENGER_RATE * tod * dt * research.demand_mult();
         for (slot, share) in slots.iter_mut().zip(w) {
             *slot += new * share;
         }

@@ -175,7 +175,7 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Per-line profit graphs, bus upgrades, loans
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
-- [ ] **Researches menu**: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
+- [ ] **Multi-city research**: more researches exist (fuel, wages, passengers); still to do: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
 - [x] **Hover tooltips**: hovering any icon shows a small text saying what it is
 - [x] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
 - [x] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase

@@ -300,7 +300,7 @@ struct Mission {
     reward: f64,
 }
 
-const MISSIONS: [Mission; 10] = [
+const MISSIONS: [Mission; 11] = [
     Mission {
         title: "Build 2 parking stands",
         target: 2.0,
@@ -310,6 +310,11 @@ const MISSIONS: [Mission; 10] = [
         title: "Buy your first bus",
         target: 1.0,
         reward: 500.0,
+    },
+    Mission {
+        title: "Build the 3 service rooms",
+        target: 3.0,
+        reward: 1_000.0,
     },
     Mission {
         title: "Open your first line",
@@ -370,10 +375,17 @@ fn progress(
     match i {
         0 => fleet.stand_count() as f64,
         1 => fleet.buses.len() as f64,
-        2 | 7 => lines.0.len() as f64,
-        3 => buses as f64,
-        4 | 8 => eco.boarded as f64,
-        5 => staff.drivers.len() as f64,
+        2 => {
+            use crate::fleet::Room;
+            [Room::FuelStation, Room::WashBay, Room::Workshop]
+                .iter()
+                .filter(|r| fleet.has_room(**r))
+                .count() as f64
+        }
+        3 | 8 => lines.0.len() as f64,
+        4 => buses as f64,
+        5 | 9 => eco.boarded as f64,
+        6 => staff.drivers.len() as f64,
         _ => trips.served_total as f64,
     }
 }

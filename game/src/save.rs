@@ -170,6 +170,15 @@ pub struct SaveData {
     depot: Option<(f32, f32)>,
     #[serde(default)]
     rooms: Vec<bool>,
+    /// Everything built on the lot: (item code, column, row). `None` in saves from before free placement.
+    #[serde(default)]
+    placed: Option<Vec<(u8, i32, i32)>>,
+    /// Finished research (by `research::TECHS` index); empty in older saves.
+    #[serde(default)]
+    research_done: Vec<bool>,
+    /// Research in progress: (tech, finishing game minute).
+    #[serde(default)]
+    research_active: Option<(usize, f64)>,
     drivers: Vec<Driver>,
     candidates: Vec<Driver>,
     staff_next_id: u32,
@@ -260,6 +269,7 @@ fn collect(world: &World) -> Option<SaveData> {
     let trips = world.get_resource::<Trips>()?;
     let catalog = world.get_resource::<Catalog>()?;
     let missions = world.get_resource::<Missions>()?;
+    let research = world.get_resource::<crate::research::Research>()?;
     Some(SaveData {
         version: SAVE_VERSION,
         saved_at: now(),
@@ -308,9 +318,18 @@ fn collect(world: &World) -> Option<SaveData> {
         depot: world
             .get_resource::<crate::ops::DepotSite>()
             .map(|d| (d.pos.x, d.pos.y)),
-        stands: Some(fleet.stands.to_vec()),
+        stands: Some(Vec::new()),
         lot_level: fleet.lot_level,
-        rooms: fleet.rooms.to_vec(),
+        rooms: Vec::new(),
+        research_done: research.done.to_vec(),
+        research_active: research.active,
+        placed: Some(
+            fleet
+                .placed
+                .iter()
+                .map(|p| (p.item.code(), p.c, p.r))
+                .collect(),
+        ),
         drivers: staff
             .drivers
             .iter()
@@ -396,20 +415,21 @@ pub fn apply_pending_load(world: &mut World) {
     }
 
     let mut fleet = Fleet::default();
-    match &data.stands {
-        Some(st) => {
-            for (i, v) in st.iter().take(crate::fleet::BAYS).enumerate() {
-                fleet.stands[i] = *v;
-            }
-            fleet.lot_level = data.lot_level.min(2);
-            for (i, v) in data.rooms.iter().take(4).enumerate() {
-                fleet.rooms[i] = *v;
+    fleet.lot_level = data.lot_level.min(2);
+    if let Some(list) = &data.placed {
+        for (code, c, r) in list {
+            if let Some(item) = crate::fleet::Item::from_code(*code) {
+                fleet
+                    .placed
+                    .push(crate::fleet::Placed { item, c: *c, r: *r });
             }
         }
-        None => {
-            fleet.stands = [true; crate::fleet::BAYS];
-            fleet.lot_level = 2;
-        }
+    } else if let Some(st) = &data.stands {
+        fleet.placed = crate::fleet::migrate_old_layout(st, &data.rooms);
+    } else {
+        // Very old saves: the whole old lot was built.
+        fleet.placed = crate::fleet::migrate_old_layout(&[true; 16], &[]);
+        fleet.lot_level = 2;
     }
     for b in &data.buses {
         let spec = catalog.0.iter().position(|s| s.name == b.spec).unwrap_or(0);
@@ -437,6 +457,20 @@ pub fn apply_pending_load(world: &mut World) {
     world.insert_resource(map);
     world.insert_resource(catalog);
     world.insert_resource(lines);
+    // Research: saved list, plus whatever the lot level of older saves already implies.
+    let mut research = crate::research::Research::from_lot_level(fleet.lot_level);
+    for (i, d) in data
+        .research_done
+        .iter()
+        .enumerate()
+        .take(research.done.len())
+    {
+        research.done[i] |= *d;
+    }
+    research.active = data
+        .research_active
+        .filter(|(i, _)| *i < crate::research::TECHS.len() && !research.done[*i]);
+    world.insert_resource(research);
     world.insert_resource(fleet);
     world.insert_resource(staff);
     if let Some(mut c) = world.get_resource_mut::<GameClock>() {
@@ -455,7 +489,10 @@ pub fn apply_pending_load(world: &mut World) {
     }
     if let Some(mut m) = world.get_resource_mut::<Missions>() {
         // Saves from before the depot builder have two fewer onboarding missions.
-        m.done = data.missions_done + if data.stands.is_none() { 2 } else { 0 };
+        m.done = data.missions_done
+            + if data.stands.is_none() { 2 } else { 0 }
+            // The "required rooms" mission was added as the third mission.
+            + if data.placed.is_none() && data.missions_done >= 2 { 1 } else { 0 };
     }
 }
 

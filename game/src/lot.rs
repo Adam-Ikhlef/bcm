@@ -6,8 +6,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use crate::{
-    depot::{bay_pos, DepotCamera, View, BAY_L, BAY_W},
-    fleet::{Fleet, Room, BAYS, LOT_COLS, LOT_EXPAND_COST, LOT_LEVEL_COLS, STAND_COST},
+    depot::{DepotCamera, View, BAY_L, BAY_W},
+    fleet::{
+        cell_at, footprint_center, Cell, Fleet, Item, Placed, Room, CELL, GRID_COLS, GRID_ROWS,
+        LOT_EXPAND_COST, LOT_LEVEL_COLS,
+    },
     style,
     ui::{button, fmt_money, text, Action, BtnKind, UiAction, UiFonts},
     Economy, GameWorld, UiBlock,
@@ -27,38 +30,72 @@ pub enum DepotPanel {
 pub enum BuildTool {
     #[default]
     None,
-    PlaceStand,
-    RemoveStand,
+    Place(Item),
+    Remove,
 }
 
-/// Slot under the cursor while a stand tool is active.
+impl BuildTool {
+    /// Tool codes used by `Action::BuildTool`: 0 none, 1 demolish, 2.. = item code + 2.
+    pub fn from_code(n: u8) -> BuildTool {
+        match n {
+            0 => BuildTool::None,
+            1 => BuildTool::Remove,
+            n => Item::from_code(n - 2)
+                .map(BuildTool::Place)
+                .unwrap_or(BuildTool::None),
+        }
+    }
+}
+
+/// Cell under the cursor while a build tool is active.
 #[derive(Resource, Default)]
-pub struct BuildHover(pub Option<usize>);
+pub struct BuildHover(pub Option<Cell>);
 
 #[derive(Component)]
 pub struct LotVisual;
 
-/// Room plots on the left side of the lot: (x, z).
-pub fn room_pos(r: Room) -> Vec3 {
-    let z = [-21.0, -7.0, 7.0, 21.0][r.index()];
-    Vec3::new(-36.0, 0.0, z)
+/// Where an item's top-left corner goes when the cursor is over `cell` (the item is centred on it).
+pub fn anchor(item: Item, cell: Cell) -> Cell {
+    let (w, h) = item.size();
+    (cell.0 - (w - 1) / 2, cell.1 - (h - 1) / 2)
 }
-
-const ROOM_W: f32 = 12.0;
-const ROOM_D: f32 = 11.0;
 
 /// What the lot looks like; used both for the game and for the menu backdrop.
 pub struct LotState {
-    pub stands: [bool; BAYS],
+    pub placed: Vec<Placed>,
     pub level: u8,
-    pub rooms: [bool; 4],
-    pub tool: BuildTool,
-    pub show_plots: bool,
-    pub hover: Option<usize>,
+    pub show_grid: bool,
+    /// Item being placed: (item, c, r, fits).
+    pub ghost: Option<(Item, i32, i32, bool)>,
+    /// Item under the cursor with the demolish tool.
+    pub doomed: Option<Placed>,
 }
 
-pub fn unlocked(level: u8, bay: usize) -> bool {
-    bay % LOT_COLS < LOT_LEVEL_COLS[(level as usize).min(2)]
+/// A fully built lot for the main-menu backdrop (also used to park its buses).
+pub fn demo_layout() -> Vec<Placed> {
+    let mut v = Vec::new();
+    for r in [0, 6] {
+        for c in 5..13 {
+            v.push(Placed {
+                item: Item::Stand,
+                c,
+                r,
+            });
+        }
+    }
+    for (room, (c, r)) in [
+        (Room::Workshop, (0, 0)),
+        (Room::WashBay, (0, 3)),
+        (Room::FuelStation, (0, 5)),
+        (Room::BreakRoom, (0, 8)),
+    ] {
+        v.push(Placed {
+            item: Item::Room(room),
+            c,
+            r,
+        });
+    }
+    v
 }
 
 fn mat(materials: &mut Assets<StandardMaterial>, c: Color, rough: f32) -> Handle<StandardMaterial> {
@@ -89,12 +126,11 @@ pub fn spawn_lot(
     let line = mat(materials, style::rgb(0xf2, 0xf2, 0xee), 0.8);
     let wall = mat(materials, style::rgb(0xe6, 0xdf, 0xcf), 0.85);
     let door = mat(materials, style::rgb(0x3a, 0x40, 0x48), 0.6);
-    let locked = glow(materials, Color::srgba(0.80, 0.52, 0.18, 0.55));
-    let free = glow(materials, Color::srgba(0.20, 0.75, 0.35, 0.28));
-    let del = glow(materials, Color::srgba(0.85, 0.25, 0.25, 0.28));
-    let hov_ok = glow(materials, Color::srgba(0.25, 0.9, 0.4, 0.6));
-    let hov_bad = glow(materials, Color::srgba(0.95, 0.3, 0.3, 0.6));
-    let outline = glow(materials, Color::srgba(1.0, 1.0, 1.0, 0.22));
+    let locked = glow(materials, Color::srgba(0.80, 0.52, 0.18, 0.45));
+    let free = glow(materials, Color::srgba(0.20, 0.75, 0.35, 0.16));
+    let del = glow(materials, Color::srgba(0.85, 0.25, 0.25, 0.45));
+    let hov_ok = glow(materials, Color::srgba(0.25, 0.9, 0.4, 0.55));
+    let hov_bad = glow(materials, Color::srgba(0.95, 0.3, 0.3, 0.55));
 
     let mut put = |m: &Handle<StandardMaterial>, pos: Vec3, scale: Vec3| {
         commands.spawn((
@@ -105,137 +141,113 @@ pub fn spawn_lot(
             GameWorld,
         ));
     };
+    let cell_center =
+        |c: i32, r: i32| footprint_center(Item::Stand, c, r) - Vec3::new(0.0, 0.0, 1.5 * CELL);
 
-    for bay in 0..BAYS {
-        let p = bay_pos(bay);
-        let open = unlocked(st.level, bay);
-        if !open {
-            // Overgrown land that still has to be bought.
-            put(
-                &locked,
-                p + Vec3::new(0.0, 0.1, 0.0),
-                Vec3::new(BAY_W - 0.2, 0.04, BAY_L),
-            );
-            for dz in [-BAY_L / 2.0, BAY_L / 2.0] {
+    // Land that still has to be bought, and (while building) the free spots of your lot.
+    for c in 0..GRID_COLS {
+        for r in 0..GRID_ROWS {
+            let owned = c < LOT_LEVEL_COLS[(st.level as usize).min(2)];
+            let p = cell_center(c, r);
+            if !owned {
+                if c >= 5 {
+                    put(
+                        &locked,
+                        p + Vec3::new(0.0, 0.1, 0.0),
+                        Vec3::new(CELL - 0.3, 0.04, CELL - 0.3),
+                    );
+                }
+            } else if st.show_grid && !st.placed.iter().any(|q| q.covers((c, r))) {
                 put(
-                    &door,
-                    p + Vec3::new(0.0, 0.5, dz),
-                    Vec3::new(BAY_W - 0.2, 1.0, 0.12),
+                    &free,
+                    p + Vec3::new(0.0, 0.09, 0.0),
+                    Vec3::new(CELL - 0.3, 0.03, CELL - 0.3),
                 );
             }
-            continue;
-        }
-        if st.stands[bay] {
-            put(
-                &pad,
-                p + Vec3::new(0.0, 0.07, 0.0),
-                Vec3::new(BAY_W - 0.3, 0.03, BAY_L),
-            );
-            for dx in [-BAY_W / 2.0, BAY_W / 2.0] {
-                put(
-                    &line,
-                    p + Vec3::new(dx, 0.1, 0.0),
-                    Vec3::new(0.14, 0.02, BAY_L),
-                );
-            }
-            put(
-                &line,
-                p + Vec3::new(0.0, 0.1, -BAY_L / 2.0),
-                Vec3::new(BAY_W, 0.02, 0.14),
-            );
-        } else {
-            // Faint outline of a free slot where a stand could go.
-            for dx in [-BAY_W / 2.0 + 0.1, BAY_W / 2.0 - 0.1] {
-                put(
-                    &outline,
-                    p + Vec3::new(dx, 0.1, 0.0),
-                    Vec3::new(0.1, 0.02, BAY_L),
-                );
-            }
-        }
-        // Tool overlays.
-        let m = match (st.tool, st.stands[bay]) {
-            (BuildTool::PlaceStand, false) => Some(&free),
-            (BuildTool::RemoveStand, true) => Some(&del),
-            _ => None,
-        };
-        if let Some(m) = m {
-            put(
-                m,
-                p + Vec3::new(0.0, 0.14, 0.0),
-                Vec3::new(BAY_W - 0.3, 0.03, BAY_L - 0.3),
-            );
-        }
-        if st.hover == Some(bay) {
-            let good = match st.tool {
-                BuildTool::PlaceStand => !st.stands[bay],
-                BuildTool::RemoveStand => st.stands[bay],
-                BuildTool::None => false,
-            };
-            put(
-                if good { &hov_ok } else { &hov_bad },
-                p + Vec3::new(0.0, 0.2, 0.0),
-                Vec3::new(BAY_W - 0.1, 0.04, BAY_L),
-            );
         }
     }
 
-    // Rooms.
-    for r in Room::ALL {
-        let p = room_pos(r);
-        let (cr, cg, cb) = r.color();
-        if st.rooms[r.index()] {
-            let accent = mat(materials, style::rgb(cr, cg, cb), 0.7);
-            put(
-                &wall,
-                p + Vec3::new(0.0, 2.4, 0.0),
-                Vec3::new(ROOM_W, 4.8, ROOM_D),
-            );
-            put(
-                &accent,
-                p + Vec3::new(0.0, 5.0, 0.0),
-                Vec3::new(ROOM_W + 0.8, 0.5, ROOM_D + 0.8),
-            );
-            // Door and a coloured sign on the lot side (+x).
-            put(
-                &door,
-                p + Vec3::new(ROOM_W / 2.0 + 0.05, 1.5, 0.0),
-                Vec3::new(0.15, 3.0, 4.0),
-            );
-            put(
-                &accent,
-                p + Vec3::new(ROOM_W / 2.0 + 0.08, 4.0, 0.0),
-                Vec3::new(0.15, 1.0, 6.0),
-            );
-            if r == Room::FuelStation {
-                // Pump island with a canopy.
+    for pl in &st.placed {
+        let p = pl.center();
+        let (w, h) = pl.item.size();
+        match pl.item {
+            Item::Stand => {
+                put(
+                    &pad,
+                    p + Vec3::new(0.0, 0.07, 0.0),
+                    Vec3::new(BAY_W - 0.3, 0.03, BAY_L),
+                );
+                for dx in [-BAY_W / 2.0, BAY_W / 2.0] {
+                    put(
+                        &line,
+                        p + Vec3::new(dx, 0.1, 0.0),
+                        Vec3::new(0.14, 0.02, BAY_L),
+                    );
+                }
+                put(
+                    &line,
+                    p + Vec3::new(0.0, 0.1, -BAY_L / 2.0),
+                    Vec3::new(BAY_W, 0.02, 0.14),
+                );
+            }
+            Item::Room(r) => {
+                let (cr, cg, cb) = r.color();
+                let accent = mat(materials, style::rgb(cr, cg, cb), 0.7);
+                let (fw, fd) = (w as f32 * CELL, h as f32 * CELL);
+                let (bw, bd) = if r == Room::FuelStation {
+                    (fw * 0.45, fd - 2.0)
+                } else {
+                    (fw - 2.0, fd - 2.0)
+                };
+                // The building sits on the west side of its footprint, the door faces east (+x).
+                let bx = p.x - fw / 2.0 + 1.0 + bw / 2.0;
+                let bp = Vec3::new(bx, 0.0, p.z);
+                put(&wall, bp + Vec3::new(0.0, 2.4, 0.0), Vec3::new(bw, 4.8, bd));
                 put(
                     &accent,
-                    p + Vec3::new(ROOM_W / 2.0 + 4.0, 3.4, 0.0),
-                    Vec3::new(6.0, 0.4, 8.0),
+                    bp + Vec3::new(0.0, 5.0, 0.0),
+                    Vec3::new(bw + 0.8, 0.5, bd + 0.8),
                 );
                 put(
                     &door,
-                    p + Vec3::new(ROOM_W / 2.0 + 4.0, 1.0, 0.0),
-                    Vec3::new(0.8, 2.0, 1.4),
+                    bp + Vec3::new(bw / 2.0 + 0.05, 1.5, 0.0),
+                    Vec3::new(0.15, 3.0, (bd * 0.35).min(4.0)),
                 );
+                put(
+                    &accent,
+                    bp + Vec3::new(bw / 2.0 + 0.08, 4.0, 0.0),
+                    Vec3::new(0.15, 1.0, (bd * 0.55).min(6.0)),
+                );
+                if r == Room::FuelStation {
+                    // Pump island with a canopy.
+                    let cx = bx + bw / 2.0 + (fw - bw - 2.0) / 2.0 + 0.5;
+                    put(
+                        &accent,
+                        Vec3::new(cx, 3.4, p.z),
+                        Vec3::new(fw - bw - 2.5, 0.4, bd * 0.6),
+                    );
+                    put(&door, Vec3::new(cx, 1.0, p.z), Vec3::new(0.8, 2.0, 1.4));
+                }
             }
-        } else if st.show_plots {
-            let g = glow(
-                materials,
-                Color::srgba(
-                    cr as f32 / 255.0,
-                    cg as f32 / 255.0,
-                    cb as f32 / 255.0,
-                    0.35,
-                ),
-            );
-            put(
-                &g,
-                p + Vec3::new(0.0, 0.12, 0.0),
-                Vec3::new(ROOM_W, 0.04, ROOM_D),
-            );
         }
+    }
+
+    // Tool overlays.
+    if let Some(d) = &st.doomed {
+        let (w, h) = d.item.size();
+        put(
+            &del,
+            d.center() + Vec3::new(0.0, 0.2, 0.0),
+            Vec3::new(w as f32 * CELL, 0.05, h as f32 * CELL),
+        );
+    }
+    if let Some((item, c, r, ok)) = st.ghost {
+        let (w, h) = item.size();
+        put(
+            if ok { &hov_ok } else { &hov_bad },
+            footprint_center(item, c, r) + Vec3::new(0.0, 0.25, 0.0),
+            Vec3::new(w as f32 * CELL - 0.2, 0.05, h as f32 * CELL - 0.2),
+        );
     }
 }
 
@@ -249,7 +261,7 @@ pub fn sync_lot(
     tool: Res<BuildTool>,
     hover: Res<BuildHover>,
     existing: Query<Entity, With<LotVisual>>,
-    mut last: Local<Option<(u32, DepotPanel, BuildTool, Option<usize>)>>,
+    mut last: Local<Option<(u32, DepotPanel, BuildTool, Option<Cell>)>>,
 ) {
     let key = (fleet.version, *panel, *tool, hover.0);
     if *last == Some(key) && !existing.is_empty() {
@@ -260,17 +272,32 @@ pub fn sync_lot(
         commands.entity(e).despawn();
     }
     let build = *panel == DepotPanel::Build;
+    let mut ghost = None;
+    let mut doomed = None;
+    if build {
+        if let Some(cell) = hover.0 {
+            match *tool {
+                BuildTool::Place(item) => {
+                    let (c, r) = anchor(item, cell);
+                    ghost = Some((item, c, r, fleet.can_place(item, c, r).is_ok()));
+                }
+                BuildTool::Remove => {
+                    doomed = fleet.placed_at(cell).map(|i| fleet.placed[i]);
+                }
+                BuildTool::None => {}
+            }
+        }
+    }
     spawn_lot(
         &mut commands,
         &mut meshes,
         &mut materials,
         &LotState {
-            stands: fleet.stands,
+            placed: fleet.placed.clone(),
             level: fleet.lot_level,
-            rooms: fleet.rooms,
-            tool: if build { *tool } else { BuildTool::None },
-            show_plots: build,
-            hover: if build { hover.0 } else { None },
+            show_grid: build && *tool != BuildTool::None,
+            ghost,
+            doomed,
         },
     );
 }
@@ -286,25 +313,16 @@ pub fn menu_lot(
         &mut meshes,
         &mut materials,
         &LotState {
-            stands: [true; BAYS],
+            placed: demo_layout(),
             level: 2,
-            rooms: [true, true, false, true],
-            tool: BuildTool::None,
-            show_plots: false,
-            hover: None,
+            show_grid: false,
+            ghost: None,
+            doomed: None,
         },
     );
 }
 
-/// Which stand slot lies under a ground point.
-pub fn bay_at(p: Vec3) -> Option<usize> {
-    (0..BAYS).find(|b| {
-        let c = bay_pos(*b);
-        (p.x - c.x).abs() <= BAY_W / 2.0 && (p.z - c.z).abs() <= BAY_L / 2.0
-    })
-}
-
-/// Cursor -> slot, click -> build or remove a stand.
+/// Cursor -> cell, click -> place or demolish.
 pub fn build_input(
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&Camera, &GlobalTransform), With<DepotCamera>>,
@@ -325,7 +343,8 @@ pub fn build_input(
             if let Ok(ray) = camera.viewport_to_world(gt, cursor) {
                 if ray.direction.y.abs() > 1e-4 {
                     let t = -ray.origin.y / ray.direction.y;
-                    now = bay_at(ray.origin + *ray.direction * t);
+                    let g = ray.origin + *ray.direction * t;
+                    now = cell_at(g.x, g.z);
                 }
             }
         }
@@ -333,43 +352,44 @@ pub fn build_input(
     if hover.0 != now {
         hover.0 = now;
     }
-    let Some(bay) = now else { return };
+    let Some(cell) = now else { return };
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
     match *tool {
-        BuildTool::PlaceStand => {
-            if !fleet.slot_unlocked(bay) {
+        BuildTool::Place(item) => {
+            let (c, r) = anchor(item, cell);
+            let price = item.price();
+            if let Err(why) = fleet.can_place(item, c, r) {
+                eco.say(&real, why);
+            } else if eco.money < price {
                 eco.say(
                     &real,
-                    "This part of the lot is not yours yet: expand the lot first",
+                    format!(
+                        "Not enough money: {} costs {}",
+                        item.label(),
+                        fmt_money(price)
+                    ),
                 );
-            } else if fleet.stands[bay] {
-                eco.say(&real, "There is already a stand here");
-            } else if eco.money < STAND_COST {
-                eco.say(
-                    &real,
-                    format!("Not enough money: a stand costs {}", fmt_money(STAND_COST)),
-                );
-            } else if fleet.build_stand(bay) {
-                eco.money -= STAND_COST;
-                eco.costs += STAND_COST;
+            } else if fleet.place(item, c, r) {
+                eco.money -= price;
+                eco.costs += price;
+                if item != Item::Stand {
+                    eco.say(&real, format!("{} built", item.label()));
+                }
             }
         }
-        BuildTool::RemoveStand => {
-            if fleet.remove_stand(bay) {
-                eco.money += STAND_COST * 0.5;
+        BuildTool::Remove => match fleet.remove_at(cell) {
+            Ok(p) => {
+                let refund = p.item.price() * 0.5;
+                eco.money += refund;
                 eco.say(
                     &real,
-                    format!("Stand removed, refunded {}", fmt_money(STAND_COST * 0.5)),
-                );
-            } else if fleet.stands[bay] {
-                eco.say(
-                    &real,
-                    "Park fewer buses first: every bus needs its own stand",
+                    format!("{} removed, refunded {}", p.item.label(), fmt_money(refund)),
                 );
             }
-        }
+            Err(why) => eco.say(&real, why),
+        },
         BuildTool::None => {}
     }
 }
@@ -382,6 +402,7 @@ pub fn lot_actions(
     mut panel: ResMut<DepotPanel>,
     mut tool: ResMut<BuildTool>,
     mut view: ResMut<View>,
+    research: Res<crate::research::Research>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
@@ -407,37 +428,9 @@ pub fn lot_actions(
                 *tool = BuildTool::None;
             }
             Action::BuildTool(n) => {
-                *tool = match (n, *tool) {
-                    (1, BuildTool::PlaceStand) | (2, BuildTool::RemoveStand) => BuildTool::None,
-                    (1, _) => BuildTool::PlaceStand,
-                    (2, _) => BuildTool::RemoveStand,
-                    _ => BuildTool::None,
-                };
+                let want = BuildTool::from_code(n);
+                *tool = if *tool == want { BuildTool::None } else { want };
                 fleet.version += 1;
-            }
-            Action::BuyRoom(n) => {
-                let Some(r) = Room::from_index(n as usize) else {
-                    continue;
-                };
-                if fleet.has_room(r) {
-                    continue;
-                }
-                if eco.money < r.price() {
-                    eco.say(
-                        &real,
-                        format!(
-                            "Not enough money: {} costs {}",
-                            r.label(),
-                            fmt_money(r.price())
-                        ),
-                    );
-                } else {
-                    eco.money -= r.price();
-                    eco.costs += r.price();
-                    fleet.rooms[r.index()] = true;
-                    fleet.version += 1;
-                    eco.say(&real, format!("{} built", r.label()));
-                }
             }
             Action::ExpandLot => {
                 let lvl = fleet.lot_level as usize;
@@ -445,7 +438,9 @@ pub fn lot_actions(
                     continue;
                 }
                 let cost = LOT_EXPAND_COST[lvl];
-                if eco.money < cost {
+                if !research.lot_unlocked(lvl) {
+                    eco.say(&real, "Research the lot expansion first (flask button)");
+                } else if eco.money < cost {
                     eco.say(
                         &real,
                         format!("Not enough money: expanding costs {}", fmt_money(cost)),
@@ -464,37 +459,102 @@ pub fn lot_actions(
 }
 
 /// Content of the "Build" panel.
-pub fn build_body(p: &mut ChildSpawnerCommands, f: &UiFonts, fleet: &Fleet, tool: BuildTool) {
-    p.spawn(text(f, true, 12.0, style::MUTED, "PARKING STANDS"));
+pub fn build_body(
+    p: &mut ChildSpawnerCommands,
+    f: &UiFonts,
+    fleet: &Fleet,
+    tool: BuildTool,
+    research: &crate::research::Research,
+) {
+    p.spawn(text(f, true, 12.0, style::MUTED, "BUILD ON YOUR LOT"));
     p.spawn(text(
         f,
         false,
         12.0,
         style::MUTED,
         format!(
-            "{} stands built · {} buses. Pick a tool, then click a slot on the lot. A stand costs {}.",
+            "Pick something, then click anywhere on your lot. {} stands · {} buses.",
             fleet.stand_count(),
-            fleet.buses.len(),
-            fmt_money(STAND_COST)
+            fleet.buses.len()
         ),
     ));
+    let items = [
+        Item::Stand,
+        Item::Room(Room::FuelStation),
+        Item::Room(Room::Workshop),
+        Item::Room(Room::WashBay),
+        Item::Room(Room::BreakRoom),
+    ];
+    for item in items {
+        let selected = tool == BuildTool::Place(item);
+        let (count, blurb, upkeep) = match item {
+            Item::Stand => (
+                fleet.stand_count(),
+                "Every bus needs its own stand".to_string(),
+                0.0,
+            ),
+            Item::Room(r) => (fleet.room_count(r), r.blurb().to_string(), r.upkeep()),
+        };
+        let sub = if upkeep > 0.0 {
+            format!("{blurb} · {}/day", fmt_money(upkeep))
+        } else {
+            blurb
+        };
+        p.spawn((
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            },
+            children![
+                (
+                    Node {
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                    children![
+                        text(
+                            f,
+                            true,
+                            13.0,
+                            style::TEXT,
+                            format!("{} · {count} built", item.label())
+                        ),
+                        text(f, false, 11.0, style::MUTED, sub),
+                    ]
+                ),
+                button(
+                    f,
+                    if selected {
+                        "Cancel".to_string()
+                    } else {
+                        format!("Place  {}", fmt_money(item.price()))
+                    },
+                    Action::BuildTool(item.code() + 2),
+                    if selected {
+                        BtnKind::Primary
+                    } else {
+                        BtnKind::Small
+                    }
+                ),
+            ],
+        ));
+    }
     p.spawn(Node {
         column_gap: Val::Px(6.0),
         ..default()
     })
     .with_children(|row| {
-        let k = |on: bool| if on { BtnKind::Primary } else { BtnKind::Small };
         row.spawn(button(
             f,
-            "Place stand",
+            "Demolish (50% refund)",
             Action::BuildTool(1),
-            k(tool == BuildTool::PlaceStand),
-        ));
-        row.spawn(button(
-            f,
-            "Remove stand",
-            Action::BuildTool(2),
-            k(tool == BuildTool::RemoveStand),
+            if tool == BuildTool::Remove {
+                BtnKind::Primary
+            } else {
+                BtnKind::Small
+            },
         ));
     });
 
@@ -529,18 +589,27 @@ pub fn build_body(p: &mut ChildSpawnerCommands, f: &UiFonts, fleet: &Fleet, tool
                             11.0,
                             style::MUTED,
                             format!(
-                                "Unlocks {} more stand slots",
-                                2 * (LOT_LEVEL_COLS[lvl + 1] - LOT_LEVEL_COLS[lvl])
+                                "Adds {} more building cells",
+                                GRID_ROWS * (LOT_LEVEL_COLS[lvl + 1] - LOT_LEVEL_COLS[lvl])
                             )
                         ),
                     ]
                 ),
-                button(
-                    f,
-                    format!("Expand  {}", fmt_money(cost)),
-                    Action::ExpandLot,
-                    BtnKind::Small
-                ),
+                if research.lot_unlocked(lvl) {
+                    button(
+                        f,
+                        format!("Expand  {}", fmt_money(cost)),
+                        Action::ExpandLot,
+                        BtnKind::Small,
+                    )
+                } else {
+                    button(
+                        f,
+                        "Research first".to_string(),
+                        Action::ToggleResearch,
+                        BtnKind::Small,
+                    )
+                },
             ],
         ));
     } else {
@@ -551,47 +620,6 @@ pub fn build_body(p: &mut ChildSpawnerCommands, f: &UiFonts, fleet: &Fleet, tool
             style::TEXT,
             "Lot level 3 of 3: fully expanded",
         ));
-    }
-
-    p.spawn(text(f, true, 12.0, style::MUTED, "ROOMS"));
-    for r in Room::ALL {
-        let built = fleet.has_room(r);
-        p.spawn((
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            },
-            children![(
-                Node {
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-                children![
-                    text(f, true, 13.0, style::TEXT, r.label()),
-                    text(
-                        f,
-                        false,
-                        11.0,
-                        style::MUTED,
-                        format!("{} · {}/day", r.blurb(), fmt_money(r.upkeep()))
-                    ),
-                ]
-            )],
-        ))
-        .with_children(|row| {
-            if built {
-                row.spawn(text(f, true, 12.0, style::CBM_GREEN, "Built"));
-            } else {
-                row.spawn(button(
-                    f,
-                    format!("Build  {}", fmt_money(r.price())),
-                    Action::BuyRoom(r.index() as u8),
-                    BtnKind::Small,
-                ));
-            }
-        });
     }
     let up = fleet.upkeep();
     if up > 0.0 {
