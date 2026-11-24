@@ -22,6 +22,17 @@ use crate::{
     Economy, GameWorld, UiBlock,
 };
 
+/// The sun of the depot scene (moves with the game clock).
+#[derive(Component)]
+pub struct Sun;
+
+/// Materials that glow at night.
+#[derive(Resource)]
+pub struct DepotGlow {
+    lamp: Handle<StandardMaterial>,
+    windows: Handle<StandardMaterial>,
+}
+
 // --- Views and cameras ----------------------------------------------------------
 
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -647,8 +658,14 @@ pub fn spawn_depot_scene(
         GameWorld,
     ));
 
+    commands.insert_resource(DepotGlow {
+        lamp: lamp_glow.clone(),
+        windows: win_lit.clone(),
+    });
+
     // Sun
     commands.spawn((
+        Sun,
         DirectionalLight {
             illuminance: 7_500.0,
             shadows_enabled: true,
@@ -663,6 +680,114 @@ pub fn spawn_depot_scene(
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.95, 0.35, 0.0)),
         GameWorld,
     ));
+}
+
+/// Light of the scene at a time of day.
+pub struct Daylight {
+    pub pitch: f32,
+    pub yaw: f32,
+    pub sun_lux: f32,
+    pub sun: (f32, f32, f32),
+    pub ambient: (f32, f32, f32),
+    pub ambient_lux: f32,
+    /// 1.0 in daylight down to ~0.35 at night: scales the background colour.
+    pub bright: f32,
+    /// 0 by day, 1 at night: lamps and windows glow.
+    pub night: f32,
+}
+
+fn mix(a: (f32, f32, f32), b: (f32, f32, f32), t: f32) -> (f32, f32, f32) {
+    (
+        a.0 + (b.0 - a.0) * t,
+        a.1 + (b.1 - a.1) * t,
+        a.2 + (b.2 - a.2) * t,
+    )
+}
+
+/// Sunrise about 6:00, sunset about 19:30; twilight fades the light smoothly.
+pub fn daylight(hour: f32) -> Daylight {
+    let (rise, set) = (6.0_f32, 19.5_f32);
+    let t = ((hour - rise) / (set - rise)).clamp(0.0, 1.0);
+    let elev = (t * std::f32::consts::PI).sin().max(0.0); // 0 at the horizon .. 1 at noon
+                                                          // Light level incl. twilight (30 min before/after).
+    let edge = |x: f32| (x / 0.6).clamp(0.0, 1.0);
+    let lit = edge(hour - rise + 0.5).min(edge(set + 0.5 - hour));
+    let lit = lit * lit * (3.0 - 2.0 * lit);
+    let warm = (1.0 - elev.sqrt()).clamp(0.0, 1.0);
+    Daylight {
+        pitch: -(0.22 + 0.78 * elev),
+        yaw: 0.35 + (0.5 - t) * 1.6,
+        sun_lux: 900.0 + 6_600.0 * lit * elev * (2.0 - elev),
+        sun: if lit > 0.0 {
+            mix((1.0, 0.97, 0.92), (1.0, 0.68, 0.42), warm)
+        } else {
+            (0.55, 0.65, 1.0)
+        },
+        ambient: mix((0.30, 0.38, 0.65), (0.85, 0.9, 1.0), lit),
+        ambient_lux: 170.0 + 130.0 * lit,
+        bright: 0.5 + 0.5 * lit,
+        night: 1.0 - lit,
+    }
+}
+
+/// Moves the sun and dims the world with the game clock (noon in the menu).
+#[allow(clippy::too_many_arguments)]
+pub fn apply_daylight(
+    clock: Option<Res<crate::ops::GameClock>>,
+    state: Res<State<crate::AppState>>,
+    mut sun: Query<(&mut DirectionalLight, &mut Transform), With<Sun>>,
+    mut ambient: ResMut<AmbientLight>,
+    mut cams: Query<&mut Camera, With<DepotCamera>>,
+    glow: Option<Res<DepotGlow>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut last: Local<Option<u32>>,
+    new_sun: Query<(), Added<Sun>>,
+) {
+    if !new_sun.is_empty() {
+        *last = None;
+    }
+    let (hour, key) = match (&clock, **state == crate::AppState::Playing) {
+        (Some(c), true) => {
+            let m = c.minute_of_day();
+            (m as f32 / 60.0, m / 4)
+        }
+        _ => (12.0, 100_000),
+    };
+    let fresh = sun.iter().count() > 0 && glow.is_some();
+    if *last == Some(key) || !fresh {
+        return;
+    }
+    *last = Some(key);
+    let d = daylight(hour);
+    for (mut light, mut tf) in &mut sun {
+        light.illuminance = d.sun_lux;
+        light.color = Color::srgb(d.sun.0, d.sun.1, d.sun.2);
+        tf.rotation = Quat::from_euler(EulerRot::XYZ, d.pitch, d.yaw, 0.0);
+    }
+    ambient.color = Color::srgb(d.ambient.0, d.ambient.1, d.ambient.2);
+    ambient.brightness = d.ambient_lux;
+    for mut cam in &mut cams {
+        let base = (
+            0x86 as f32 / 255.0,
+            0xb4 as f32 / 255.0,
+            0x66 as f32 / 255.0,
+        );
+        cam.clear_color = ClearColorConfig::Custom(Color::srgb(
+            base.0 * d.bright,
+            base.1 * d.bright,
+            base.2 * d.bright * (1.0 + 0.4 * d.night),
+        ));
+    }
+    if let Some(g) = glow {
+        if let Some(m) = mats.get_mut(&g.lamp) {
+            let k = 0.25 + 5.0 * d.night;
+            m.emissive = LinearRgba::rgb(2.0 * k, 1.8 * k, 1.2 * k);
+        }
+        if let Some(m) = mats.get_mut(&g.windows) {
+            let k = 0.4 + 5.0 * d.night;
+            m.emissive = LinearRgba::rgb(0.6 * k, 0.5 * k, 0.2 * k);
+        }
+    }
 }
 
 pub fn install_lighting(world: &mut World) {
@@ -1623,5 +1748,29 @@ mod tests {
         assert!(g.place(Item::Stand, 5, 6));
         let r = exit_path((5, 6), &g);
         assert!(r[1].z > GRID_Z0 + GRID_ROWS as f32 * CELL);
+    }
+}
+
+#[cfg(test)]
+mod daylight_tests {
+    use super::*;
+
+    #[test]
+    fn night_is_darker_than_day_and_changes_smoothly() {
+        let (noon, night) = (daylight(12.5), daylight(1.0));
+        assert!(noon.sun_lux > 3.0 * night.sun_lux);
+        assert!(noon.bright > night.bright && night.night > 0.99 && noon.night < 0.01);
+        // No jumps: neighbouring minutes differ little.
+        let mut prev = daylight(0.0);
+        for m in 1..=24 * 60 {
+            let d = daylight(m as f32 / 60.0);
+            assert!(d.sun_lux.is_finite() && d.pitch.is_finite() && d.yaw.is_finite());
+            assert!(
+                (d.sun_lux - prev.sun_lux).abs() < 400.0,
+                "jump at minute {m}"
+            );
+            assert!((d.bright - prev.bright).abs() < 0.05);
+            prev = d;
+        }
     }
 }

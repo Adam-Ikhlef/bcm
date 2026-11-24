@@ -407,6 +407,7 @@ fn main() {
         Update,
         (
             depot::apply_view,
+            depot::apply_daylight,
             (save::pause_system, save::save_system, save::sandbox_money),
             (sidebar::update_minimap, sidebar::update_missions),
             (
