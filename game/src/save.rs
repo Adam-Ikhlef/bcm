@@ -85,6 +85,8 @@ impl GameMode {
 pub struct Session {
     pub mode: GameMode,
     pub place: Place,
+    /// Neighbouring cities unlocked by research, merged into the same map.
+    pub extra: Vec<Place>,
 }
 
 /// Sandbox: the bank account never runs dry.
@@ -148,6 +150,9 @@ pub struct SaveData {
     pub company_logo: String,
     pub mode: GameMode,
     pub place: Place,
+    /// Extra cities merged into the map (empty in older saves).
+    #[serde(default)]
+    pub extra_cities: Vec<Place>,
     pub clock_abs: f64,
     pub last_day: u64,
     money: f64,
@@ -243,7 +248,7 @@ pub fn delete_save(path: &std::path::Path) {
     }
 }
 
-fn write_save(data: &SaveData, auto: bool) -> Result<(), String> {
+pub fn write_save(data: &SaveData, auto: bool) -> Result<(), String> {
     let dir = saves_dir().ok_or("no user data folder")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let name = if auto {
@@ -258,7 +263,7 @@ fn write_save(data: &SaveData, auto: bool) -> Result<(), String> {
     std::fs::rename(&tmp, dir.join(name)).map_err(|e| e.to_string())
 }
 
-fn collect(world: &World) -> Option<SaveData> {
+pub fn collect(world: &World) -> Option<SaveData> {
     let session = world.get_resource::<Session>()?;
     let company = world.get_resource::<Company>()?;
     let clock = world.get_resource::<GameClock>()?;
@@ -277,6 +282,7 @@ fn collect(world: &World) -> Option<SaveData> {
         company_logo: company.logo.clone(),
         mode: session.mode,
         place: session.place.clone(),
+        extra_cities: session.extra.clone(),
         clock_abs: clock.abs,
         last_day: clock.last_day,
         money: eco.money,

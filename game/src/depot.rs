@@ -1189,8 +1189,10 @@ pub fn rebuild_panel(
             BuildTool,
             crate::bus_menu::BuyState,
             u32,
+            u32,
         )>,
     >,
+    research: Res<crate::research::Research>,
     view: Res<View>,
     st: Res<crate::bus_menu::BuyState>,
     market: Res<crate::bus_menu::Market>,
@@ -1206,6 +1208,7 @@ pub fn rebuild_panel(
         *tool,
         *st,
         market.version,
+        research.version,
     );
     if *last == Some(key) {
         return;
