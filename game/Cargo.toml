@@ -29,7 +29,7 @@ discord-rich-presence = "1"
 # In-game updater: unpack the downloaded release and verify its checksum
 flate2 = "1"
 tar = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 
 [build-dependencies]
