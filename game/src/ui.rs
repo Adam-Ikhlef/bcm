@@ -94,8 +94,6 @@ pub enum Action {
     UiScaleStep(i32),
     ToggleLines,
     ToggleMissions,
-    ToggleResearch,
-    StartResearch(u8),
     BusTab(u8),
     Qty(i8),
     PaintPick(u8),
