@@ -170,6 +170,97 @@ pub fn download_city(place: &Place) -> Result<MapData, String> {
     }
 }
 
+/// Loads the home city and merges the extra cities into one big map.
+pub fn download_region(home: &Place, extra: &[Place]) -> Result<MapData, String> {
+    let mut map = download_city(home)?;
+    for p in extra {
+        let other = download_city(p).map_err(|e| format!("{}: {e}", short_name(p)))?;
+        map.merge(other);
+    }
+    Ok(map)
+}
+
+pub fn short_name(p: &Place) -> &str {
+    p.display_name.split(',').next().unwrap_or("").trim()
+}
+
+#[derive(Deserialize)]
+struct NearbyResponse {
+    elements: Vec<NearbyEl>,
+}
+
+#[derive(Deserialize)]
+struct NearbyEl {
+    id: i64,
+    #[serde(default)]
+    tags: std::collections::HashMap<String, String>,
+    center: Option<NearbyCenter>,
+}
+
+#[derive(Deserialize)]
+struct NearbyCenter {
+    lat: f64,
+    lon: f64,
+}
+
+/// Turns an Overpass answer into places, nearest to `(lat, lon)` first, without the excluded ones.
+fn parse_nearby(json: &str, lat: f64, lon: f64, exclude: &[Place]) -> Result<Vec<Place>, String> {
+    let resp: NearbyResponse = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let mut found: Vec<(f64, Place)> = Vec::new();
+    for el in resp.elements {
+        let Some(name) = el.tags.get("name").cloned() else {
+            continue;
+        };
+        if exclude.iter().any(|p| p.osm_id == el.id) || found.iter().any(|(_, p)| p.osm_id == el.id)
+        {
+            continue;
+        }
+        let d = el.center.map_or(f64::MAX, |c| {
+            let dx = (c.lon - lon) * 111.32 * lat.to_radians().cos();
+            let dy = (c.lat - lat) * 110.54;
+            (dx * dx + dy * dy).sqrt()
+        });
+        let label = match el
+            .tags
+            .get("is_in:country")
+            .or_else(|| el.tags.get("addr:country"))
+        {
+            Some(c) => format!("{name}, {c}"),
+            None => name,
+        };
+        found.push((
+            d,
+            Place {
+                osm_type: "relation".into(),
+                osm_id: el.id,
+                display_name: label,
+            },
+        ));
+    }
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    Ok(found.into_iter().take(8).map(|(_, p)| p).collect())
+}
+
+/// Towns and cities around a point (up to 60 km), as places that can be downloaded.
+pub fn nearby_cities(lat: f64, lon: f64, exclude: &[Place]) -> Result<Vec<Place>, String> {
+    let query = format!(
+        "[out:json][timeout:60];\
+         rel[\"boundary\"=\"administrative\"][\"admin_level\"~\"^(7|8)$\"][\"name\"](around:60000,{lat},{lon});\
+         out tags center 40;"
+    );
+    let mut last_err = String::from("no Overpass server configured");
+    for url in OVERPASS_SERVERS {
+        match agent().post(url).send_form(&[("data", query.as_str())]) {
+            Ok(resp) => {
+                let text = resp.into_string().map_err(|e| e.to_string())?;
+                return parse_nearby(&text, lat, lon, exclude);
+            }
+            Err(e) => last_err = format!("{url}: {e}"),
+        }
+    }
+    Err(last_err)
+}
+
 /// Downloads fresh OpenStreetMap data for an already downloaded city. The old data stays in place
 /// until the new download has been checked, so a failed update never breaks the city.
 pub fn refresh_city(place: &Place) -> Result<(), String> {
@@ -192,4 +283,27 @@ pub fn refresh_city(place: &Place) -> Result<(), String> {
         let _ = fs::write(meta_path(place), json);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nearby_places_are_sorted_and_filtered() {
+        let json = r#"{"elements":[
+            {"type":"relation","id":3,"tags":{"name":"Far"},"center":{"lat":33.5,"lon":-7.0}},
+            {"type":"relation","id":2,"tags":{"name":"Near"},"center":{"lat":33.1,"lon":-7.0}},
+            {"type":"relation","id":1,"tags":{"name":"Home"},"center":{"lat":33.0,"lon":-7.0}},
+            {"type":"relation","id":4,"tags":{},"center":{"lat":33.0,"lon":-7.0}}
+        ]}"#;
+        let home = Place {
+            osm_type: "relation".into(),
+            osm_id: 1,
+            display_name: "Home".into(),
+        };
+        let r = parse_nearby(json, 33.0, -7.0, &[home]).unwrap();
+        let names: Vec<_> = r.iter().map(|p| p.display_name.as_str()).collect();
+        assert_eq!(names, ["Near", "Far"]);
+    }
 }

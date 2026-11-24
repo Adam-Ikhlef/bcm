@@ -159,7 +159,7 @@ below the bus center, length along Z, front toward +Z, 1 unit = 1 meter. `bus.js
 
 A new company starts with **no stands and no buses**. Use the toolbar at the bottom left:
 
-- **Build** (hammer): place or remove parking stands on your lot, expand the lot (3 levels) and build rooms: workshop (cheaper repairs), wash bay, fuel station, break room. Rooms have a daily upkeep.
+- **Build** (hammer): pick an item and click **anywhere** on your lot (grid with a preview): parking stands, and rooms: fuel station, workshop and wash bay (**required** to refuel, repair and wash buses; build as many as you like) plus a break room. Demolish refunds half. Expand the lot (3 levels). Rooms have a daily upkeep.
 - **Buses**: the bus menu (Owned / New / Second-hand, with a thumbnail of each bus). It only opens from this button. Every bus needs its own stand.
 - Main menu: **Update map** next to a downloaded city re-downloads the latest OpenStreetMap data.
 
@@ -175,13 +175,14 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Per-line profit graphs, bus upgrades, loans
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
-- [ ] **Multi-city research**: more researches exist (fuel, wages, passengers); still to do: research is required to expand the depot, to expand the service area (work in two or more cities and connect them), and more
+- [x] **Multi-city research**: "Service area I/II" researches let you add neighbouring cities; all cities load into one big map with merged road networks and a single depot
+- [ ] **External depots research** (idea): more than one depot, also in the same city
 - [x] **Hover tooltips**: hovering any icon shows a small text saying what it is
 - [x] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
 - [x] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase
-- [ ] Build stands, staff rooms and other depot buildings **anywhere** in the depot (free placement)
-- [ ] **Depot expansion by research** (the starting lot is small)
-- [ ] Fuel station, wash bay and workshop are required for every company (one of the first missions); build **more than one** of each
+- [x] Build stands, staff rooms and other depot buildings **anywhere** in the depot (free placement)
+- [x] **Depot expansion by research** (flask button: Lot expansion I and II; more research to come)
+- [x] Fuel station, wash bay and workshop are required for every company (one of the first missions); build **more than one** of each
 - [x] A new company starts with **no staff** (like no buses and no stands)
 - [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
 - [x] Update checker with changelog

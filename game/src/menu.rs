@@ -626,18 +626,23 @@ fn start_download(
     if menu.mode == Mode::Busy {
         return;
     }
+    let extra = load
+        .as_ref()
+        .map(|d| d.extra_cities.clone())
+        .unwrap_or_default();
     let mode = load.as_ref().map(|d| d.mode).unwrap_or(menu.game_mode);
     menu.pending = Some((
         crate::save::Session {
             mode,
             place: place.clone(),
+            extra: extra.clone(),
         },
         load,
     ));
     let (tx, rx) = channel();
     *inbox.0.lock().unwrap() = Some(rx);
     std::thread::spawn(move || {
-        let _ = tx.send(NetMsg::Map(net::download_city(&place)));
+        let _ = tx.send(NetMsg::Map(net::download_region(&place, &extra)));
     });
     menu.mode = Mode::Busy;
     menu.is_error = false;

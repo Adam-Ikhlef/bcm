@@ -1,12 +1,20 @@
 //! Research: pay money, wait some game days, unlock things. For now it gates the lot expansions.
 
+use std::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Mutex,
+};
+
 use bevy::{prelude::*, ui::FocusPolicy};
 
 use crate::{
+    net::{self, Place},
     ops::GameClock,
+    osm::MapData,
+    save::Session,
     style,
     ui::{button, fmt_money, text, Action, BtnKind, UiAction, UiFonts},
-    Economy,
+    AppState, Economy,
 };
 
 pub struct Tech {
@@ -18,7 +26,7 @@ pub struct Tech {
     pub needs: Option<usize>,
 }
 
-pub const TECHS: [Tech; 5] = [
+pub const TECHS: [Tech; 7] = [
     Tech {
         name: "Lot expansion I",
         blurb: "Lets you buy the next part of your lot",
@@ -54,12 +62,28 @@ pub const TECHS: [Tech; 5] = [
         days: 4.0,
         needs: None,
     },
+    Tech {
+        name: "Service area I",
+        blurb: "Lets you add one neighbouring city to your map",
+        cost: 10_000.0,
+        days: 5.0,
+        needs: Some(4),
+    },
+    Tech {
+        name: "Service area II",
+        blurb: "Lets you add a second neighbouring city",
+        cost: 18_000.0,
+        days: 7.0,
+        needs: Some(5),
+    },
 ];
 
 /// Indices of the techs with an effect on the simulation.
 const ENGINES: usize = 2;
 const TRAINING: usize = 3;
 const MARKETING: usize = 4;
+const AREA_I: usize = 5;
+const AREA_II: usize = 6;
 
 #[derive(Resource, Default)]
 pub struct Research {
@@ -75,6 +99,11 @@ impl Research {
     /// Research needed before the lot can go from `level` to `level + 1`.
     pub fn lot_unlocked(&self, level: usize) -> bool {
         self.done.get(level).copied().unwrap_or(true)
+    }
+
+    /// How many neighbouring cities may be added in total.
+    pub fn city_slots(&self) -> usize {
+        self.done[AREA_I] as usize + self.done[AREA_II] as usize
     }
 
     pub fn fuel_mult(&self) -> f32 {
@@ -114,15 +143,113 @@ impl Research {
 #[derive(Component)]
 pub struct ResearchModal;
 
+#[derive(Default)]
+pub enum ExpState {
+    #[default]
+    Idle,
+    Searching,
+    List(Vec<Place>),
+    Downloading(String),
+    Error(String),
+}
+
+enum ExpMsg {
+    Cities(Result<Vec<Place>, String>),
+    Region(Place, Result<MapData, String>),
+}
+
+/// Adding a neighbouring city: suggestions, download and the reload with the merged map.
+#[derive(Resource, Default)]
+pub struct Expansion {
+    pub state: ExpState,
+    rx: Mutex<Option<Receiver<ExpMsg>>>,
+}
+
+/// Starts a background job and remembers where its answer will arrive.
+fn spawn_job(exp: &Expansion, job: impl FnOnce(Sender<ExpMsg>) + Send + 'static) {
+    let (tx, rx) = channel();
+    *exp.rx.lock().unwrap() = Some(rx);
+    std::thread::spawn(move || job(tx));
+}
+
+/// Picks up finished downloads. A new city reloads the game with the merged map.
+pub fn expansion_poll(world: &mut World) {
+    let msg = {
+        let exp = world.resource::<Expansion>();
+        let guard = exp.rx.lock().unwrap();
+        guard.as_ref().and_then(|rx| rx.try_recv().ok())
+    };
+    let Some(msg) = msg else { return };
+    let mut exp = world.resource_mut::<Expansion>();
+    *exp.rx.lock().unwrap() = None;
+    match msg {
+        ExpMsg::Cities(Ok(list)) if list.is_empty() => {
+            exp.state = ExpState::Error("No neighbouring cities found nearby".into());
+        }
+        ExpMsg::Cities(Ok(list)) => exp.state = ExpState::List(list),
+        ExpMsg::Cities(Err(e)) => exp.state = ExpState::Error(format!("Search failed: {e}")),
+        ExpMsg::Region(_, Err(e)) => exp.state = ExpState::Error(format!("Download failed: {e}")),
+        ExpMsg::Region(place, Ok(map)) => {
+            exp.state = ExpState::Idle;
+            world.resource_mut::<Session>().extra.push(place);
+            if let Some(data) = crate::save::collect(world) {
+                let _ = crate::save::write_save(&data, true);
+                world.insert_resource(crate::save::PendingLoad(Some(data)));
+            }
+            world.insert_resource(map);
+            world
+                .resource_mut::<NextState<AppState>>()
+                .set(AppState::Playing);
+            return;
+        }
+    }
+    world.resource_mut::<Research>().version += 1;
+}
+
 pub fn research_actions(
     mut events: EventReader<UiAction>,
     mut research: ResMut<Research>,
     mut eco: ResMut<Economy>,
     clock: Res<GameClock>,
     real: Res<Time<Real>>,
+    session: Res<Session>,
+    map: Res<MapData>,
+    mut exp: ResMut<Expansion>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
+            Action::FindCities => {
+                if research.city_slots() <= session.extra.len()
+                    || matches!(exp.state, ExpState::Searching | ExpState::Downloading(_))
+                {
+                    continue;
+                }
+                let (lat, lon) = map.origin;
+                let mut exclude = session.extra.clone();
+                exclude.push(session.place.clone());
+                exp.state = ExpState::Searching;
+                spawn_job(&exp, move |tx| {
+                    let _ = tx.send(ExpMsg::Cities(net::nearby_cities(lat, lon, &exclude)));
+                });
+                research.version += 1;
+            }
+            Action::PickCity(i) => {
+                let ExpState::List(list) = &exp.state else {
+                    continue;
+                };
+                let Some(place) = list.get(i as usize).cloned() else {
+                    continue;
+                };
+                let home = session.place.clone();
+                let mut extra = session.extra.clone();
+                extra.push(place.clone());
+                exp.state = ExpState::Downloading(net::short_name(&place).to_string());
+                spawn_job(&exp, move |tx| {
+                    let r = net::download_region(&home, &extra);
+                    let _ = tx.send(ExpMsg::Region(place, r));
+                });
+                research.version += 1;
+            }
             Action::ToggleResearch => {
                 research.open = !research.open;
                 research.version += 1;
@@ -180,11 +307,14 @@ pub fn research_ui(
     research: Res<Research>,
     clock: Res<GameClock>,
     eco: Res<Economy>,
+    session: Res<Session>,
+    exp: Res<Expansion>,
     existing: Query<Entity, With<ResearchModal>>,
     mut last: Local<Option<(u32, bool, u64, bool)>>,
 ) {
     let hour = (clock.abs / 60.0) as u64;
     let key = (research.version, research.open, hour, eco.money >= 3_000.0);
+    let _ = (&session, &exp);
     if *last == Some(key) {
         return;
     }
@@ -217,8 +347,8 @@ pub fn research_ui(
                 Node {
                     width: Val::Px(540.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    padding: UiRect::all(Val::Px(22.0)),
+                    row_gap: Val::Px(8.0),
+                    padding: UiRect::all(Val::Px(18.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     ..default()
                 },
@@ -261,7 +391,7 @@ pub fn research_ui(
                         Node {
                             align_items: AlignItems::Center,
                             column_gap: Val::Px(10.0),
-                            padding: UiRect::all(Val::Px(10.0)),
+                            padding: UiRect::all(Val::Px(7.0)),
                             ..default()
                         },
                         BackgroundColor(style::INPUT),
@@ -282,15 +412,93 @@ pub fn research_ui(
                     ))
                     .with_children(|row| research_button(row, f, &research, i));
                 }
-                p.spawn(text(
-                    f,
-                    false,
-                    12.0,
-                    style::MUTED,
-                    "Planned: working in neighbouring cities and connecting them.",
-                ));
+                cities_section(p, f, &research, &session, &exp);
             });
         });
+}
+
+fn cities_section(
+    p: &mut ChildSpawnerCommands,
+    f: &UiFonts,
+    r: &Research,
+    session: &Session,
+    exp: &Expansion,
+) {
+    let mut names: Vec<&str> = vec![net::short_name(&session.place)];
+    names.extend(session.extra.iter().map(net::short_name));
+    p.spawn(text(
+        f,
+        true,
+        13.0,
+        style::TEXT,
+        format!("Your cities: {}", names.join(", ")),
+    ));
+    if r.city_slots() <= session.extra.len() {
+        let msg = if r.done[AREA_I] {
+            "Research the next service area to add another city."
+        } else {
+            "Research Service area I to connect a neighbouring city. Road networks are merged into one map."
+        };
+        p.spawn(text(f, false, 12.0, style::MUTED, msg));
+        return;
+    }
+    match &exp.state {
+        ExpState::Idle => {
+            p.spawn(button(
+                f,
+                "Add a neighbouring city",
+                Action::FindCities,
+                BtnKind::Primary,
+            ));
+        }
+        ExpState::Searching => {
+            p.spawn(text(
+                f,
+                false,
+                12.0,
+                style::ACCENT,
+                "Looking for cities nearby",
+            ));
+        }
+        ExpState::Downloading(name) => {
+            p.spawn(text(
+                f,
+                false,
+                12.0,
+                style::ACCENT,
+                format!("Downloading {name} and joining the road networks. The game reloads when it is done."),
+            ));
+        }
+        ExpState::Error(e) => {
+            p.spawn(text(f, false, 12.0, style::DANGER, e.clone()));
+            p.spawn(button(f, "Try again", Action::FindCities, BtnKind::Small));
+        }
+        ExpState::List(list) => {
+            p.spawn(text(
+                f,
+                false,
+                12.0,
+                style::MUTED,
+                "Choose the city to add (your depot stays where it is):",
+            ));
+            p.spawn(Node {
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(8.0),
+                row_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|w| {
+                for (i, c) in list.iter().enumerate().take(6) {
+                    w.spawn(button(
+                        f,
+                        net::short_name(c),
+                        Action::PickCity(i as u8),
+                        BtnKind::Small,
+                    ));
+                }
+            });
+        }
+    }
 }
 
 fn research_button(row: &mut ChildSpawnerCommands, f: &UiFonts, r: &Research, i: usize) {

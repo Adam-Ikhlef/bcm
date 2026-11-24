@@ -131,6 +131,8 @@ pub struct MapData {
     pub stops: Vec<Stop>,
     /// Real bus routes from OpenStreetMap route relations (stops resolved to `stops` indices).
     pub routes: Vec<BusRoute>,
+    /// Latitude/longitude of the map's (0, 0) point; needed to place other cities next to it.
+    pub origin: (f64, f64),
 }
 
 /// A real-world bus route imported from OpenStreetMap.
@@ -222,6 +224,168 @@ impl MapData {
             stop_at.pop();
         }
         Some(Route { path, stop_at })
+    }
+}
+
+/// Cross-city road links closer than this (meters) count as the same junction.
+const JOIN_DIST: f32 = 25.0;
+
+/// Largest strongly connected road component whose nodes all lie in `range`
+/// (components never mix cities before they are joined).
+fn largest_in(sccs: &[Vec<NodeIndex>], range: std::ops::Range<usize>) -> Vec<NodeIndex> {
+    sccs.iter()
+        .filter(|c| c.first().is_some_and(|n| range.contains(&n.index())))
+        .max_by_key(|c| c.len())
+        .cloned()
+        .unwrap_or_default()
+}
+
+impl MapData {
+    /// Where a point of a map with origin `other` lies on this map (meters).
+    fn shift_from(&self, other: (f64, f64)) -> impl Fn(Vec2) -> Vec2 {
+        let kx0 = 111_320.0 * self.origin.0.to_radians().cos();
+        let kx1 = 111_320.0 * other.0.to_radians().cos();
+        let dx = ((other.1 - self.origin.1) * kx0) as f32;
+        let dy = ((other.0 - self.origin.0) * 110_540.0) as f32;
+        let sx = (kx0 / kx1) as f32;
+        move |p: Vec2| Vec2::new(p.x * sx + dx, p.y + dy)
+    }
+
+    /// Adds another city to this map. Both keep their roads, stops and bus routes; the road
+    /// networks are joined where they touch, or by one link road between their closest points.
+    pub fn merge(&mut self, other: MapData) {
+        let shift = self.shift_from(other.origin);
+        let node_off = self.graph.node_count();
+        let stop_off = self.stops.len();
+        let base_nodes = node_off;
+
+        for n in other.graph.node_indices() {
+            self.graph.add_node(shift(other.graph[n]));
+        }
+        for e in other.graph.edge_indices() {
+            let (a, b) = other.graph.edge_endpoints(e).unwrap();
+            let (a, b) = (
+                NodeIndex::new(a.index() + node_off),
+                NodeIndex::new(b.index() + node_off),
+            );
+            let len = self.graph[a].distance(self.graph[b]);
+            self.graph.add_edge(a, b, len);
+        }
+        for r in other.roads {
+            self.roads.push(Road {
+                class: r.class,
+                pts: r.pts.into_iter().map(&shift).collect(),
+            });
+        }
+        for a in other.areas {
+            self.areas.push(Area {
+                kind: a.kind,
+                pts: a.pts.into_iter().map(&shift).collect(),
+            });
+        }
+        for s in other.stops {
+            self.stops.push(Stop {
+                osm_id: s.osm_id,
+                name: s.name,
+                pos: shift(s.pos),
+                node: NodeIndex::new(s.node.index() + node_off),
+                demand: s.demand,
+            });
+        }
+        for r in other.routes {
+            self.routes.push(BusRoute {
+                stops: r.stops.iter().map(|i| i + stop_off).collect(),
+                ..r
+            });
+        }
+
+        // Join the two road networks.
+        let total = self.graph.node_count();
+        let sccs = petgraph::algo::kosaraju_scc(&self.graph);
+        let a_nodes = largest_in(&sccs, 0..base_nodes);
+        let b_nodes = largest_in(&sccs, base_nodes..total);
+        if a_nodes.is_empty() || b_nodes.is_empty() {
+            return;
+        }
+        let mut grid: HashMap<(i32, i32), Vec<NodeIndex>> = HashMap::new();
+        for &n in &a_nodes {
+            let c = (
+                (self.graph[n].x / JOIN_DIST).floor() as i32,
+                (self.graph[n].y / JOIN_DIST).floor() as i32,
+            );
+            grid.entry(c).or_default().push(n);
+        }
+        let mut links: Vec<(NodeIndex, NodeIndex)> = Vec::new();
+        for &b in &b_nodes {
+            let p = self.graph[b];
+            let (cx, cy) = (
+                (p.x / JOIN_DIST).floor() as i32,
+                (p.y / JOIN_DIST).floor() as i32,
+            );
+            let mut best: Option<(f32, NodeIndex)> = None;
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    for &a in grid.get(&(cx + dx, cy + dy)).into_iter().flatten() {
+                        let d = self.graph[a].distance(p);
+                        if d <= JOIN_DIST && best.is_none_or(|(bd, _)| d < bd) {
+                            best = Some((d, a));
+                        }
+                    }
+                }
+            }
+            if let Some((_, a)) = best {
+                links.push((a, b));
+                if links.len() >= 400 {
+                    break;
+                }
+            }
+        }
+        if links.is_empty() {
+            // Far apart: one link road between the closest pair (tested on the nodes nearest to
+            // the other city, which keeps this fast on big maps).
+            let centroid = |v: &[NodeIndex], g: &DiGraph<Vec2, f32>| {
+                v.iter().map(|&n| g[n]).sum::<Vec2>() / v.len() as f32
+            };
+            let (ca, cb) = (
+                centroid(&a_nodes, &self.graph),
+                centroid(&b_nodes, &self.graph),
+            );
+            let nearest = |v: &[NodeIndex], to: Vec2, g: &DiGraph<Vec2, f32>| {
+                let mut v: Vec<NodeIndex> = v.to_vec();
+                v.sort_by(|x, y| {
+                    g[*x]
+                        .distance_squared(to)
+                        .total_cmp(&g[*y].distance_squared(to))
+                });
+                v.truncate(1500);
+                v
+            };
+            let (ra, rb) = (
+                nearest(&a_nodes, cb, &self.graph),
+                nearest(&b_nodes, ca, &self.graph),
+            );
+            let mut best: Option<(f32, NodeIndex, NodeIndex)> = None;
+            for &a in &ra {
+                for &b in &rb {
+                    let d = self.graph[a].distance_squared(self.graph[b]);
+                    if best.is_none_or(|(bd, _, _)| d < bd) {
+                        best = Some((d, a, b));
+                    }
+                }
+            }
+            if let Some((_, a, b)) = best {
+                links.push((a, b));
+                self.roads.push(Road {
+                    class: RoadClass::Primary,
+                    pts: vec![self.graph[a], self.graph[b]],
+                });
+            }
+        }
+        for (a, b) in links {
+            let len = self.graph[a].distance(self.graph[b]).max(1.0);
+            self.graph.add_edge(a, b, len);
+            self.graph.add_edge(b, a, len);
+        }
     }
 }
 
@@ -614,6 +778,7 @@ fn build(
         areas,
         stops,
         routes,
+        origin: (lat0, lon0),
     })
 }
 
@@ -667,5 +832,50 @@ mod tests {
         assert_eq!(route.path.len(), 4);
         assert_eq!(route.stop_at[0], Some(0));
         assert_eq!(route.stop_at[2], Some(1));
+    }
+
+    fn tiny_city(lat: f64, lon: f64) -> MapData {
+        // One straight street with a bus stop at each end.
+        let mut nodes = String::new();
+        for i in 0..4 {
+            nodes.push_str(&format!(
+                r#"{{"type":"node","id":{},"lat":{},"lon":{}}},"#,
+                i + 1,
+                lat,
+                lon + i as f64 * 0.001
+            ));
+        }
+        let json = format!(
+            r#"{{"elements":[{nodes}
+            {{"type":"way","id":10,"nodes":[1,2,3,4],"tags":{{"highway":"residential"}}}},
+            {{"type":"node","id":20,"lat":{lat},"lon":{lon},"tags":{{"highway":"bus_stop","name":"A"}}}},
+            {{"type":"node","id":21,"lat":{lat},"lon":{l3},"tags":{{"highway":"bus_stop","name":"B"}}}}
+            ]}}"#,
+            l3 = lon + 0.003
+        );
+        load_overpass(json.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn merging_cities_joins_roads_and_keeps_stops() {
+        let mut a = tiny_city(33.0, -7.0);
+        let b = tiny_city(33.05, -6.9);
+        let (na, sa) = (a.graph.node_count(), a.stops.len());
+        a.merge(b);
+        assert_eq!(a.graph.node_count(), na * 2);
+        assert_eq!(a.stops.len(), sa * 2);
+        // The second city lies north-east of the first one.
+        assert!(a.stops[sa].pos.x > 5_000.0 && a.stops[sa].pos.y > 4_000.0);
+        // A bus can drive from a stop of the first city to one of the second.
+        assert!(a.route_loop(&[0, sa]).is_some());
+    }
+
+    #[test]
+    fn touching_cities_are_joined_at_the_border() {
+        let mut a = tiny_city(33.0, -7.0);
+        // Second street starts where the first one ends.
+        let b = tiny_city(33.0, -6.997);
+        a.merge(b);
+        assert!(a.route_loop(&[0, 3]).is_some());
     }
 }

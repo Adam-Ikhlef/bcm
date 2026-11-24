@@ -270,6 +270,8 @@ fn main() {
     .init_resource::<planner::DraftMeta>()
     .init_resource::<ui::LinesOpen>()
     .init_resource::<ui::MissionsOpen>()
+    .init_resource::<research::Research>()
+    .init_resource::<research::Expansion>()
     .init_resource::<bus_menu::BuyState>()
     .init_resource::<bus_menu::Market>()
     .init_resource::<bus_menu::Thumbs>()
@@ -429,6 +431,13 @@ fn main() {
                 sidebar::sync_mini_depot,
                 site::guard_view,
                 bus_menu::refresh_market,
+                (
+                    research::research_actions,
+                    research::research_tick,
+                    research::expansion_poll,
+                    research::research_ui,
+                )
+                    .chain(),
             ),
             hotkeys,
             planner::planner_actions,
