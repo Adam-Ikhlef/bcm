@@ -13,7 +13,9 @@ use bevy::{
 
 use crate::{
     busmodel::{self, BusAssets},
-    fleet::{Catalog, Category, Fleet},
+    fleet::{
+        footprint_center, Catalog, Category, Cell, Fleet, Item, Room, CELL, GRID_ROWS, GRID_Z0,
+    },
     lot::{BuildTool, DepotPanel},
     style,
     ui::{button, fmt_money, text, Action, BtnKind, GameUi, UiAction, UiFonts},
@@ -146,34 +148,34 @@ pub const BAY_L: f32 = 20.0;
 const LANE: f32 = 9.0;
 
 /// Path a departing bus drives inside the yard: out of its bay, along an apron, then east off the lot.
-pub fn exit_path(bay: usize) -> Vec<Vec3> {
+pub fn exit_path(bay: Cell, fleet: &Fleet) -> Vec<Vec3> {
     let p = bay_pos(bay);
-    let lot_w = COLS as f32 * BAY_W + 10.0;
-    let lot_d = 2.0 * BAY_L + LANE + 8.0;
-    let lane_z = if bay / COLS == 0 {
-        0.0
+    // Drive forward (+z) to the first free row, then out along it.
+    let mut row = bay.1 + Item::Stand.size().1;
+    while row < GRID_ROWS && fleet.placed_at((bay.0, row)).is_some() {
+        row += 1;
+    }
+    let lane_z = if row >= GRID_ROWS {
+        GRID_Z0 + GRID_ROWS as f32 * CELL + 2.5
     } else {
-        lot_d / 2.0 - 2.0
+        GRID_Z0 + (row as f32 + 0.5) * CELL
     };
     vec![
         p,
         Vec3::new(p.x, 0.0, lane_z),
-        Vec3::new(lot_w / 2.0 + 24.0, 0.0, lane_z),
+        Vec3::new(COLS as f32 * BAY_W / 2.0 + 29.0, 0.0, lane_z),
     ]
 }
 
-pub fn exit_length(bay: usize) -> f32 {
-    exit_path(bay).windows(2).map(|w| w[0].distance(w[1])).sum()
+pub fn exit_length(bay: Cell, fleet: &Fleet) -> f32 {
+    exit_path(bay, fleet)
+        .windows(2)
+        .map(|w| w[0].distance(w[1]))
+        .sum()
 }
 
-pub fn bay_pos(bay: usize) -> Vec3 {
-    let col = (bay % COLS) as f32;
-    let row = (bay / COLS) as f32;
-    Vec3::new(
-        (col - (COLS as f32 - 1.0) / 2.0) * BAY_W,
-        0.0,
-        (row - 0.5) * (BAY_L + LANE),
-    )
+pub fn bay_pos(bay: Cell) -> Vec3 {
+    footprint_center(Item::Stand, bay.0, bay.1)
 }
 
 #[derive(Component)]
@@ -755,7 +757,7 @@ pub fn sync_depot_buses(
     }
     *last = Some(fleet.version);
 
-    let wanted: Vec<(u32, usize)> = fleet
+    let wanted: Vec<(u32, Cell)> = fleet
         .buses
         .iter()
         .filter(|b| b.line.is_none())
@@ -1187,8 +1189,10 @@ pub fn rebuild_panel(
             BuildTool,
             crate::bus_menu::BuyState,
             u32,
+            u32,
         )>,
     >,
+    research: Res<crate::research::Research>,
     view: Res<View>,
     st: Res<crate::bus_menu::BuyState>,
     market: Res<crate::bus_menu::Market>,
@@ -1204,6 +1208,7 @@ pub fn rebuild_panel(
         *tool,
         *st,
         market.version,
+        research.version,
     );
     if *last == Some(key) {
         return;
@@ -1320,7 +1325,7 @@ pub fn rebuild_panel(
         }
 
         if *panel == DepotPanel::Build {
-            crate::lot::build_body(p, f, &fleet, *tool);
+            crate::lot::build_body(p, f, &fleet, *tool, &research);
             return;
         }
         if *panel != DepotPanel::Shop {
@@ -1440,9 +1445,19 @@ pub fn depot_actions(
                 if b.line.is_some() || b.depart.is_some() {
                     continue;
                 }
+                let (fuel, repair, wash) = (
+                    fleet.has_room(Room::FuelStation),
+                    fleet.has_room(Room::Workshop),
+                    fleet.has_room(Room::WashBay),
+                );
                 let cost = b.service_cost(&fleet);
-                if cost < 0.5 {
-                    eco.say(&real, "This bus does not need service");
+                if !(fuel || repair || wash) {
+                    eco.say(
+                        &real,
+                        "Build a fuel station, a workshop and a wash bay to service buses",
+                    );
+                } else if cost < 0.5 {
+                    eco.say(&real, "This bus does not need service here");
                 } else if eco.money < cost {
                     eco.say(
                         &real,
@@ -1452,12 +1467,18 @@ pub fn depot_actions(
                     eco.money -= cost;
                     eco.costs += cost;
                     if let Some(b) = fleet.get_mut(id) {
-                        b.fuel = 100.0;
-                        b.condition = 100.0;
-                        b.clean = 100.0;
+                        if fuel {
+                            b.fuel = 100.0;
+                        }
+                        if repair {
+                            b.condition = 100.0;
+                        }
+                        if wash {
+                            b.clean = 100.0;
+                        }
                     }
                     fleet.version += 1;
-                    eco.say(&real, "Bus refueled, repaired and cleaned");
+                    eco.say(&real, "Bus serviced");
                 }
             }
             Action::Sell(id) => {
@@ -1484,7 +1505,7 @@ pub fn animate_departures(fleet: Res<Fleet>, mut q: Query<(&DepotBus, &mut Trans
         let (Some(bay), Some(dep)) = (b.bay, b.depart) else {
             continue;
         };
-        let path = exit_path(bay);
+        let path = exit_path(bay, &fleet);
         let mut dist = dep.elapsed * crate::dispatch::EXIT_SPEED;
         let mut heading = Vec3::Z;
         let mut pos = path[0];
@@ -1526,10 +1547,16 @@ pub fn menu_backdrop_buses(
     for mut c in &mut depot_cam {
         c.is_active = true;
     }
-    for (n, bay) in [0usize, 1, 2, 4, 5, 8, 9, 10, 12, 13]
+    let stands = crate::lot::demo_layout()
+        .iter()
+        .filter(|p| p.item == Item::Stand)
+        .map(|p| (p.c, p.r))
+        .collect::<Vec<_>>();
+    for (n, i) in [0usize, 1, 2, 4, 5, 8, 9, 10, 12, 13]
         .into_iter()
         .enumerate()
     {
+        let Some(&bay) = stands.get(i) else { continue };
         if catalog.0.is_empty() {
             break;
         }
@@ -1573,5 +1600,28 @@ pub fn menu_backdrop_camera(
 pub fn menu_backdrop_exit(mut commands: Commands, q: Query<Entity, With<GameWorld>>) {
     for e in &q {
         commands.entity(e).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_path_skips_stands_in_front() {
+        let mut f = Fleet::default();
+        assert!(f.place(Item::Stand, 5, 0));
+        assert!(f.place(Item::Stand, 5, 4));
+        let p = exit_path((5, 0), &f);
+        // Rows 0-3 and 4-7 are stands: the first free row is 8.
+        assert!((p[1].z - (GRID_Z0 + 8.5 * CELL)).abs() < 1e-3);
+        assert!(p[2].x > p[1].x);
+        let q = exit_path((5, 4), &f);
+        assert!((q[1].z - (GRID_Z0 + 8.5 * CELL)).abs() < 1e-3);
+        // The lone stand at the end leaves the grid.
+        let mut g = Fleet::default();
+        assert!(g.place(Item::Stand, 5, 6));
+        let r = exit_path((5, 6), &g);
+        assert!(r[1].z > GRID_Z0 + GRID_ROWS as f32 * CELL);
     }
 }

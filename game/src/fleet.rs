@@ -7,16 +7,132 @@ use serde::Deserialize;
 
 use crate::style;
 
-/// Largest number of parking stands the lot can ever hold (2 rows x 8 columns).
-pub const BAYS: usize = 16;
-/// Stand columns per row.
-pub const LOT_COLS: usize = 8;
-/// Columns that are usable at each lot level (the rest is still overgrown land).
-pub const LOT_LEVEL_COLS: [usize; 3] = [4, 6, 8];
+/// Size of one grid cell of the depot, in metres. A parking stand is 1 cell wide, 4 cells long.
+pub const CELL: f32 = 5.0;
+pub const GRID_COLS: i32 = 13;
+pub const GRID_ROWS: i32 = 10;
+/// World position of the grid's top-left corner (x, z).
+pub const GRID_X0: f32 = -45.0;
+pub const GRID_Z0: f32 = -25.0;
+/// Columns you own at each lot level (all rows are owned; the left plot is owned from the start).
+pub const LOT_LEVEL_COLS: [i32; 3] = [9, 11, 13];
 /// Price to expand the lot from level 0 -> 1 and 1 -> 2.
 pub const LOT_EXPAND_COST: [f64; 2] = [6_000.0, 12_000.0];
-/// Price of one parking stand and the refund when it is removed.
+/// Price of one parking stand; removing it refunds half.
 pub const STAND_COST: f64 = 400.0;
+
+/// A grid cell (column, row).
+pub type Cell = (i32, i32);
+
+/// Something that can be placed on the lot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Item {
+    Stand,
+    Room(Room),
+}
+
+impl Item {
+    /// Footprint in cells (columns, rows).
+    pub fn size(self) -> (i32, i32) {
+        match self {
+            Item::Stand => (1, 4),
+            Item::Room(Room::Workshop) | Item::Room(Room::FuelStation) => (3, 3),
+            Item::Room(Room::WashBay) => (3, 2),
+            Item::Room(Room::BreakRoom) => (2, 2),
+        }
+    }
+
+    pub fn price(self) -> f64 {
+        match self {
+            Item::Stand => STAND_COST,
+            Item::Room(r) => r.price(),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Item::Stand => "Parking stand",
+            Item::Room(r) => r.label(),
+        }
+    }
+
+    pub fn code(self) -> u8 {
+        match self {
+            Item::Stand => 0,
+            Item::Room(r) => 1 + r.index() as u8,
+        }
+    }
+
+    pub fn from_code(c: u8) -> Option<Item> {
+        match c {
+            0 => Some(Item::Stand),
+            n => Room::from_index(n as usize - 1).map(Item::Room),
+        }
+    }
+}
+
+/// An item placed on the lot; (c, r) is its top-left cell.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Placed {
+    pub item: Item,
+    pub c: i32,
+    pub r: i32,
+}
+
+impl Placed {
+    pub fn covers(&self, cell: Cell) -> bool {
+        let (w, h) = self.item.size();
+        cell.0 >= self.c && cell.0 < self.c + w && cell.1 >= self.r && cell.1 < self.r + h
+    }
+
+    /// Centre of the footprint on the ground.
+    pub fn center(&self) -> Vec3 {
+        footprint_center(self.item, self.c, self.r)
+    }
+}
+
+pub fn footprint_center(item: Item, c: i32, r: i32) -> Vec3 {
+    let (w, h) = item.size();
+    Vec3::new(
+        GRID_X0 + (c as f32 + w as f32 / 2.0) * CELL,
+        0.0,
+        GRID_Z0 + (r as f32 + h as f32 / 2.0) * CELL,
+    )
+}
+
+/// Turns the fixed 16-slot lot of older saves into placed items.
+pub fn migrate_old_layout(stands: &[bool], rooms: &[bool]) -> Vec<Placed> {
+    let mut v = Vec::new();
+    for (b, on) in stands.iter().enumerate().take(16) {
+        if *on {
+            let (col, row) = ((b % 8) as i32, b / 8);
+            v.push(Placed {
+                item: Item::Stand,
+                c: 5 + col,
+                r: if row == 0 { 0 } else { 6 },
+            });
+        }
+    }
+    for (i, (c, r)) in [(0, 0), (0, 3), (0, 5), (0, 8)].into_iter().enumerate() {
+        if rooms.get(i).copied().unwrap_or(false) {
+            if let Some(room) = Room::from_index(i) {
+                v.push(Placed {
+                    item: Item::Room(room),
+                    c,
+                    r,
+                });
+            }
+        }
+    }
+    v
+}
+
+/// The cell under a ground point.
+pub fn cell_at(x: f32, z: f32) -> Option<Cell> {
+    let c = ((x - GRID_X0) / CELL).floor() as i32;
+    let r = ((z - GRID_Z0) / CELL).floor() as i32;
+    (c >= 0 && r >= 0 && c < GRID_COLS && r < GRID_ROWS).then_some((c, r))
+}
 
 /// Buildings the player can add to the depot.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -54,9 +170,9 @@ impl Room {
 
     pub fn blurb(self) -> &'static str {
         match self {
-            Room::Workshop => "Repairs cost 50% less",
-            Room::WashBay => "Cleaning costs 70% less",
-            Room::FuelStation => "Fuel costs 40% less",
+            Room::Workshop => "Repairs your buses (needed)",
+            Room::WashBay => "Washes your buses (needed)",
+            Room::FuelStation => "Refuels your buses (needed)",
             Room::BreakRoom => "Driver wages 5% lower",
         }
     }
@@ -420,7 +536,7 @@ pub struct FleetBus {
     pub clean: f32,
     /// Line index while driving, `None` while parked in the depot.
     pub line: Option<usize>,
-    pub bay: Option<usize>,
+    pub bay: Option<Cell>,
     /// The line this bus is assigned to (it leaves the depot for that line's departures).
     pub assigned: Option<usize>,
     pub depart: Option<Depart>,
@@ -436,26 +552,19 @@ impl FleetBus {
         self.fuel <= 5.0 || self.condition <= 5.0 || self.clean <= 5.0
     }
 
-    /// Price of a full service; rooms make parts of it cheaper.
+    /// Price of a full service. Fuel, repairs and washing each need their own room.
     pub fn service_cost(&self, fleet: &Fleet) -> f64 {
-        let fuel = if fleet.has_room(Room::FuelStation) {
-            0.6
-        } else {
-            1.0
-        };
-        let repair = if fleet.has_room(Room::Workshop) {
-            0.5
-        } else {
-            1.0
-        };
-        let wash = if fleet.has_room(Room::WashBay) {
-            0.3
-        } else {
-            1.0
-        };
-        ((100.0 - self.fuel) * 0.5 * fuel
-            + (100.0 - self.condition) * 2.0 * repair
-            + (100.0 - self.clean) * 0.3 * wash) as f64
+        let mut cost = 0.0;
+        if fleet.has_room(Room::FuelStation) {
+            cost += (100.0 - self.fuel) as f64 * 0.5 * 0.6;
+        }
+        if fleet.has_room(Room::Workshop) {
+            cost += (100.0 - self.condition) as f64 * 2.0 * 0.5;
+        }
+        if fleet.has_room(Room::WashBay) {
+            cost += (100.0 - self.clean) as f64 * 0.3 * 0.3;
+        }
+        cost
     }
 }
 
@@ -465,12 +574,10 @@ pub struct Fleet {
     pub next_id: u32,
     /// Bumped whenever buses are added/removed/assigned (UI and 3D scene resync on change).
     pub version: u32,
-    /// Which of the `BAYS` parking stands the player has built.
-    pub stands: [bool; BAYS],
+    /// Everything built on the lot (stands and rooms).
+    pub placed: Vec<Placed>,
     /// Lot expansion level (0..=2), see `LOT_LEVEL_COLS`.
     pub lot_level: u8,
-    /// Built rooms, indexed by `Room::index`.
-    pub rooms: [bool; 4],
 }
 
 fn plate_for(id: u32) -> String {
@@ -480,54 +587,103 @@ fn plate_for(id: u32) -> String {
 }
 
 impl Fleet {
-    /// Whether the stand slot lies inside the part of the lot the player owns.
-    pub fn slot_unlocked(&self, bay: usize) -> bool {
-        bay < BAYS && bay % LOT_COLS < LOT_LEVEL_COLS[(self.lot_level as usize).min(2)]
+    /// Whether a cell lies inside the part of the lot the player owns.
+    pub fn owns_cell(&self, c: i32, r: i32) -> bool {
+        c >= 0 && r >= 0 && c < LOT_LEVEL_COLS[(self.lot_level as usize).min(2)] && r < GRID_ROWS
+    }
+
+    /// Whether `item` fits at (c, r): inside the owned lot and not overlapping anything.
+    pub fn can_place(&self, item: Item, c: i32, r: i32) -> Result<(), &'static str> {
+        let (w, h) = item.size();
+        for dc in 0..w {
+            for dr in 0..h {
+                if !self.owns_cell(c + dc, r + dr) {
+                    return Err("Outside your lot: expand the lot or build somewhere else");
+                }
+            }
+        }
+        if self.placed.iter().any(|p| {
+            let (pw, ph) = p.item.size();
+            c < p.c + pw && p.c < c + w && r < p.r + ph && p.r < r + h
+        }) {
+            return Err("Something is already built here");
+        }
+        Ok(())
+    }
+
+    /// Places an item (the caller handles the money).
+    pub fn place(&mut self, item: Item, c: i32, r: i32) -> bool {
+        if self.can_place(item, c, r).is_err() {
+            return false;
+        }
+        self.placed.push(Placed { item, c, r });
+        self.version += 1;
+        true
+    }
+
+    pub fn placed_at(&self, cell: Cell) -> Option<usize> {
+        self.placed.iter().position(|p| p.covers(cell))
+    }
+
+    /// Demolishes what stands on `cell`. A stand that holds a bus, or is needed by a bus, stays.
+    pub fn remove_at(&mut self, cell: Cell) -> Result<Placed, &'static str> {
+        let i = self.placed_at(cell).ok_or("Nothing to remove here")?;
+        let p = self.placed[i];
+        if p.item == Item::Stand {
+            if self.buses.iter().any(|b| b.bay == Some((p.c, p.r))) {
+                return Err("A bus is parked on this stand");
+            }
+            if self.buses.len() >= self.stand_count() {
+                return Err("Park fewer buses first: every bus needs its own stand");
+            }
+        }
+        self.placed.remove(i);
+        self.version += 1;
+        Ok(p)
+    }
+
+    /// Top-left cells of all stands, in a stable order (row by row).
+    pub fn stands(&self) -> Vec<Cell> {
+        let mut v: Vec<Cell> = self
+            .placed
+            .iter()
+            .filter(|p| p.item == Item::Stand)
+            .map(|p| (p.c, p.r))
+            .collect();
+        v.sort_by_key(|&(c, r)| (r, c));
+        v
     }
 
     pub fn stand_count(&self) -> usize {
-        self.stands.iter().filter(|s| **s).count()
+        self.placed.iter().filter(|p| p.item == Item::Stand).count()
+    }
+
+    pub fn room_count(&self, r: Room) -> usize {
+        self.placed
+            .iter()
+            .filter(|p| p.item == Item::Room(r))
+            .count()
     }
 
     pub fn has_room(&self, r: Room) -> bool {
-        self.rooms[r.index()]
+        self.room_count(r) > 0
     }
 
     /// Daily cost of all rooms.
     pub fn upkeep(&self) -> f64 {
-        Room::ALL
+        self.placed
             .iter()
-            .filter(|r| self.has_room(**r))
-            .map(|r| r.upkeep())
+            .map(|p| match p.item {
+                Item::Room(r) => r.upkeep(),
+                Item::Stand => 0.0,
+            })
             .sum()
     }
 
-    /// Builds a stand (the caller handles the money). Fails on locked, taken or invalid slots.
-    pub fn build_stand(&mut self, bay: usize) -> bool {
-        if !self.slot_unlocked(bay) || self.stands[bay] {
-            return false;
-        }
-        self.stands[bay] = true;
-        self.version += 1;
-        true
-    }
-
-    /// Removes an empty stand. Only allowed while every bus would still have a stand.
-    pub fn remove_stand(&mut self, bay: usize) -> bool {
-        if bay >= BAYS || !self.stands[bay] || self.buses.len() >= self.stand_count() {
-            return false;
-        }
-        // The stand that is removed must not hold a bus.
-        if self.buses.iter().any(|b| b.bay == Some(bay)) {
-            return false;
-        }
-        self.stands[bay] = false;
-        self.version += 1;
-        true
-    }
-
-    pub fn free_bay(&self) -> Option<usize> {
-        (0..BAYS).find(|b| self.stands[*b] && !self.buses.iter().any(|x| x.bay == Some(*b)))
+    pub fn free_bay(&self) -> Option<Cell> {
+        self.stands()
+            .into_iter()
+            .find(|s| !self.buses.iter().any(|x| x.bay == Some(*s)))
     }
 
     /// Adds a new bus parked in a free bay.
@@ -628,63 +784,89 @@ impl Fleet {
 mod tests {
     use super::*;
 
+    fn stands(f: &mut Fleet, n: i32) {
+        for i in 0..n {
+            assert!(f.place(Item::Stand, 5 + i, 0));
+        }
+    }
+
     #[test]
     fn fleet_bays_and_service() {
         let mut f = Fleet::default();
-        f.stands = [true; BAYS];
-        f.lot_level = 2;
+        stands(&mut f, 4);
         let a = f.add(0).unwrap();
         let b = f.add(1).unwrap();
-        assert_eq!(f.get(a).unwrap().bay, Some(0));
-        assert_eq!(f.get(b).unwrap().bay, Some(1));
+        assert_eq!(f.get(a).unwrap().bay, Some((5, 0)));
+        assert_eq!(f.get(b).unwrap().bay, Some((6, 0)));
         assert_ne!(f.get(a).unwrap().plate, f.get(b).unwrap().plate);
 
         // A bus leaves for a line, freeing its bay; a new bus takes it.
         f.get_mut(a).unwrap().line = Some(0);
         f.get_mut(a).unwrap().bay = None;
         let c = f.add(0).unwrap();
-        assert_eq!(f.get(c).unwrap().bay, Some(0));
+        assert_eq!(f.get(c).unwrap().bay, Some((5, 0)));
         // Coming back it gets the next free bay.
         f.park(a);
-        assert_eq!(f.get(a).unwrap().bay, Some(2));
+        assert_eq!(f.get(a).unwrap().bay, Some((7, 0)));
 
         f.get_mut(b).unwrap().fuel = 0.0;
         assert!(f.get(b).unwrap().needs_service());
-        assert!((f.get(b).unwrap().service_cost(&f) - 50.0).abs() < 1e-6);
+        // Without a fuel station nothing can be refuelled.
+        assert_eq!(f.get(b).unwrap().service_cost(&f), 0.0);
+        assert!(f.place(Item::Room(Room::FuelStation), 0, 0));
+        assert!((f.get(b).unwrap().service_cost(&f) - 30.0).abs() < 1e-6);
         assert_eq!(f.unassigned_operational(), Some(a));
     }
 
     #[test]
-    fn fleet_is_limited_by_stands() {
+    fn placement_rules() {
         let mut f = Fleet::default();
         // A new company has no stands, so no bus can be parked.
         assert!(f.add(0).is_none());
-        // Slots outside the owned lot cannot be built.
-        assert!(f.build_stand(0));
-        assert!(!f.build_stand(0));
-        assert!(!f.build_stand(5), "column 5 is locked at level 0");
+        assert!(f.place(Item::Stand, 5, 0));
+        assert!(!f.place(Item::Stand, 5, 2), "overlaps the first stand");
+        assert!(f.place(Item::Stand, 5, 4));
+        // Column 9 is locked at level 0.
+        assert!(f.can_place(Item::Stand, 9, 0).is_err());
         f.lot_level = 1;
-        assert!(f.build_stand(5));
+        assert!(f.can_place(Item::Stand, 9, 0).is_ok());
+        // Rooms fit on the left plot, several of the same kind are allowed.
+        assert!(f.place(Item::Room(Room::Workshop), 0, 0));
+        assert!(f.place(Item::Room(Room::Workshop), 0, 3));
+        assert_eq!(f.room_count(Room::Workshop), 2);
+        assert!(
+            !f.place(Item::Room(Room::Workshop), 12, 0),
+            "outside the lot"
+        );
+        // Stands with a bus cannot be removed.
         assert!(f.add(0).is_some());
         assert!(f.add(0).is_some());
-        assert!(f.add(0).is_none());
-        // Stands with a bus on them cannot be removed.
-        assert!(!f.remove_stand(0));
+        assert!(f.remove_at((5, 0)).is_err());
         f.buses.pop();
-        assert!(f.remove_stand(5));
+        assert!(f.remove_at((5, 4)).is_ok());
         assert_eq!(f.stand_count(), 1);
+        assert!(f.remove_at((0, 0)).is_ok());
+        assert_eq!(f.room_count(Room::Workshop), 1);
     }
 
     #[test]
-    fn rooms_discount_service() {
+    fn rooms_enable_service() {
         let mut f = Fleet::default();
-        f.stands[0] = true;
+        f.place(Item::Stand, 5, 0);
         f.add(0).unwrap();
         f.buses[0].condition = 50.0;
-        let full = f.buses[0].service_cost(&f);
-        f.rooms[Room::Workshop.index()] = true;
-        assert!((f.buses[0].service_cost(&f) - full / 2.0).abs() < 1e-6);
+        assert_eq!(f.buses[0].service_cost(&f), 0.0);
+        f.place(Item::Room(Room::Workshop), 0, 0);
+        assert!((f.buses[0].service_cost(&f) - 50.0).abs() < 1e-6);
         assert!(f.upkeep() > 0.0);
+    }
+
+    #[test]
+    fn item_codes_roundtrip() {
+        for code in 0..5u8 {
+            assert_eq!(Item::from_code(code).unwrap().code(), code);
+        }
+        assert!(Item::from_code(9).is_none());
     }
 
     #[test]

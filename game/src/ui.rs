@@ -94,6 +94,8 @@ pub enum Action {
     UiScaleStep(i32),
     ToggleLines,
     ToggleMissions,
+    ToggleResearch,
+    StartResearch(u8),
     BusTab(u8),
     Qty(i8),
     PaintPick(u8),
@@ -120,9 +122,8 @@ pub enum Action {
     ToggleDiscord,
     /// Opens (or closes) a depot panel: 0 = bus shop, 1 = build.
     OpenPanel(u8),
-    /// Build tool: 0 none, 1 place stands, 2 remove stands.
+    /// Build tool: 0 none, 1 demolish, 2.. place an item (see `BuildTool::from_code`).
     BuildTool(u8),
-    BuyRoom(u8),
     ExpandLot,
     DepotConfirm,
     /// Re-download the map data of a cached city (index into the cached list).
@@ -368,6 +369,7 @@ pub struct NavIcons {
     /// Blue depot marker drawn on the map.
     pub pin: Handle<Image>,
     pub shop: Handle<Image>,
+    pub research: Handle<Image>,
     pub build: Handle<Image>,
     pub staff: Handle<Image>,
     pub lines: Handle<Image>,
@@ -400,6 +402,7 @@ pub fn install_nav_icons(world: &mut World) {
         depot: load(include_bytes!("../assets/icons/depot.png")),
         pin: load(include_bytes!("../assets/icons/depot_pin.png")),
         shop: load(include_bytes!("../assets/icons/shop.png")),
+        research: load(include_bytes!("../assets/icons/research.png")),
         build: load(include_bytes!("../assets/icons/build.png")),
         staff: load(include_bytes!("../assets/icons/staff.png")),
         lines: load(include_bytes!("../assets/icons/lines.png")),
@@ -672,6 +675,12 @@ pub fn spawn_game_ui(
                 Action::SetView(View::Staff),
             );
             nav_button(p, &icons.lines, style::CBM_PURPLE, Action::ToggleLines);
+            nav_button(
+                p,
+                &icons.research,
+                style::rgb(0x12, 0x9a, 0x8c),
+                Action::ToggleResearch,
+            );
             nav_button(p, &icons.menu, style::CBM_RED, Action::Menu);
         });
 
@@ -1164,6 +1173,7 @@ fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
         Action::OpenPanel(0) => "Buses",
         Action::OpenPanel(1) => "Build in the depot",
         Action::ToggleLines => "Lines",
+        Action::ToggleResearch => "Research",
         Action::Menu => "Menu",
         Action::Finish => "Finish the line",
         Action::Cancel => "Cancel",

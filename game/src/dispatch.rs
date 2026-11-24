@@ -77,6 +77,7 @@ pub fn daily_rollover(
     real: Res<Time<Real>>,
     session: Res<crate::save::Session>,
     fleet: Res<crate::fleet::Fleet>,
+    research: Res<crate::research::Research>,
 ) {
     let day = clock.day();
     if day <= clock.last_day {
@@ -88,7 +89,8 @@ pub fn daily_rollover(
     } else {
         1.0
     };
-    let wages = staff.daily_wages() * session.mode.wage_factor() * break_room;
+    let wages =
+        staff.daily_wages() * session.mode.wage_factor() * break_room * research.wage_mult();
     let upkeep = fleet.upkeep()
         * if session.mode.wage_factor() > 0.0 {
             1.0
@@ -158,6 +160,7 @@ pub fn spawn_bus(
     spec: &BusSpec,
     wait_until: f64,
     depot: &DepotSite,
+    fuel_mult: f32,
 ) {
     let (start, path, phase) = match &line.depot_leg {
         Some(leg) if leg.len() >= 2 => (depot.pos, leg.clone(), Phase::Approach),
@@ -175,7 +178,7 @@ pub fn spawn_bus(
             dwell: 0.0,
             capacity: spec.capacity,
             run_cost: spec.run_cost,
-            fuel_per_m: spec.fuel_per_km / 1000.0 * wear_multiplier() * driver_eff,
+            fuel_per_m: spec.fuel_per_km / 1000.0 * wear_multiplier() * driver_eff * fuel_mult,
             wear_per_m: spec.wear_per_km / 1000.0 * wear_multiplier() * driver_eff,
             phase,
             path,
@@ -204,6 +207,7 @@ pub fn advance_departures(
     lines: Res<Lines>,
     catalog: Res<Catalog>,
     depot: Res<DepotSite>,
+    research: Res<crate::research::Research>,
 ) {
     let dt = time.delta_secs();
     let mut done: Vec<(u32, Depart)> = Vec::new();
@@ -231,6 +235,7 @@ pub fn advance_departures(
                 &catalog.0[spec_idx],
                 d.wait_until,
                 &depot,
+                research.fuel_mult(),
             );
         }
         if let Some(b) = fleet.get_mut(id) {
@@ -305,7 +310,7 @@ pub fn dispatch_trips(
                     let Some(bay) = fleet.get(bid).and_then(|b| b.bay) else {
                         continue;
                     };
-                    let total = depot::exit_length(bay) / EXIT_SPEED;
+                    let total = depot::exit_length(bay, &fleet) / EXIT_SPEED;
                     if let Some(b) = fleet.get_mut(bid) {
                         b.depart = Some(Depart {
                             line: li,
