@@ -99,7 +99,7 @@ pub fn matches(map: &MapData, query: &str) -> Vec<usize> {
     map.stops
         .iter()
         .enumerate()
-        .filter(|(_, s)| s.name.to_lowercase().contains(&q))
+        .filter(|(_, s)| !s.removed() && s.name.to_lowercase().contains(&q))
         .map(|(i, _)| i)
         .take(MAX_RESULTS)
         .collect()

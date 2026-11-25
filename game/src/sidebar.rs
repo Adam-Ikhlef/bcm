@@ -109,7 +109,7 @@ pub fn build_minimap(
             hi = hi.max(*p);
         }
     }
-    for s in &map.stops {
+    for s in map.stops.iter().filter(|s| !s.removed()) {
         lo = lo.min(s.pos);
         hi = hi.max(s.pos);
     }
@@ -162,7 +162,7 @@ pub fn build_minimap(
             }
         }
     }
-    for s in &map.stops {
+    for s in map.stops.iter().filter(|s| !s.removed()) {
         let p = to_img(s.pos);
         line(&mut data, w, h, p, p, [0xff, 0xd8, 0x1f, 255], 4);
     }

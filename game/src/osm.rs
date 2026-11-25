@@ -121,6 +121,14 @@ pub struct Stop {
     pub demand: f32,
 }
 
+impl Stop {
+    /// Demolished own stations stay in the list (so stop numbers in saved lines keep working)
+    /// with zero demand; real stops never have less than 0.3.
+    pub fn removed(&self) -> bool {
+        self.demand <= 0.0
+    }
+}
+
 #[derive(Resource)]
 pub struct MapData {
     /// Road graph; node weight = position in meters, edge weight = length in meters.

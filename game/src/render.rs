@@ -514,7 +514,7 @@ pub struct StopMarker(pub usize);
 pub struct StopBadge;
 
 pub fn spawn_stops(mut commands: Commands, map: Res<MapData>, icons: Res<Icons>) {
-    for (i, s) in map.stops.iter().enumerate() {
+    for (i, s) in map.stops.iter().enumerate().filter(|(_, s)| !s.removed()) {
         crate::stations::spawn_marker(&mut commands, i, s.pos, &icons);
     }
 }

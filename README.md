@@ -190,6 +190,7 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [x] UI polish: soft panel shadows, smooth button hover fades, rolling money counter with green/red flash
 - [x] Sandbox: researches finish instantly
 - [x] Own bus stations: place stops on any road (B), build cost + monthly upkeep, saved with the game
+- [x] Demolish your own stations (X): only stations you built, not while a line uses them; upkeep stops
 - [x] Research menu with categories, picture cards and scrolling (bus menu lists scroll too)
 - [ ] **External depots research** (idea): more than one depot, also in the same city
 - [x] **Hover tooltips**: hovering any icon shows a small text saying what it is

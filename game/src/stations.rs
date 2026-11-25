@@ -17,17 +17,40 @@ pub const MONTHLY_COST: f64 = 90.0;
 /// Closer than this (meters) to another stop is not allowed.
 const MIN_GAP: f32 = 40.0;
 
+/// A station the player built.
+pub struct OwnStation {
+    pub pos: Vec2,
+    pub name: String,
+    /// Index in `MapData::stops` (kept forever, also after demolishing).
+    pub stop: usize,
+    pub gone: bool,
+}
+
 #[derive(Resource, Default)]
 pub struct Stations {
-    /// Positions and names of the stations the player built, in the order they were built.
-    pub own: Vec<(Vec2, String)>,
+    /// The stations the player built, in the order they were built (demolished ones stay listed).
+    pub own: Vec<OwnStation>,
     pub placing: bool,
+    pub demolishing: bool,
 }
 
 impl Stations {
     pub fn monthly_cost(&self) -> f64 {
-        self.own.len() as f64 * MONTHLY_COST
+        self.own.iter().filter(|o| !o.gone).count() as f64 * MONTHLY_COST
     }
+}
+
+/// Switches a station off: no demand, no destination, no marker. The stop keeps its number.
+fn tombstone(map: &mut MapData, queues: &mut StopQueues, weights: &mut DestWeights, i: usize) {
+    map.stops[i].demand = 0.0;
+    queues.waiting[i] = 0.0;
+    queues.by_dest[i].iter_mut().for_each(|v| *v = 0.0);
+    *weights = DestWeights(
+        crate::demand::build(&map.stops)
+            .into_iter()
+            .map(|c| c.weight)
+            .collect(),
+    );
 }
 
 impl MapData {
@@ -98,6 +121,7 @@ pub fn station_actions(
     for UiAction(a) in events.read() {
         match a {
             Action::ToggleStation => {
+                st.demolishing = false;
                 if st.placing {
                     st.placing = false;
                 } else if *tool == Tool::Idle && *view == View::Map {
@@ -112,12 +136,32 @@ pub fn station_actions(
                     );
                 }
             }
-            Action::Cancel | Action::NewLine => st.placing = false,
+            Action::ToggleDemolish => {
+                st.placing = false;
+                if st.demolishing {
+                    st.demolishing = false;
+                } else if *tool == Tool::Idle && *view == View::Map {
+                    if st.own.iter().all(|o| o.gone) {
+                        eco.say(&real, "You have no stations of your own to demolish");
+                    } else {
+                        st.demolishing = true;
+                        eco.say(
+                            &real,
+                            "Click one of your own stations to demolish it. Esc to stop.",
+                        );
+                    }
+                }
+            }
+            Action::Cancel | Action::NewLine => {
+                st.placing = false;
+                st.demolishing = false;
+            }
             _ => {}
         }
     }
     if *view != View::Map || *tool != Tool::Idle {
         st.placing = false;
+        st.demolishing = false;
     }
 }
 
@@ -129,7 +173,10 @@ fn cursor_world(window: &Window, cam: &(&Camera, &GlobalTransform, &Projection))
 /// Where a station would go (road node under the cursor) and whether it is allowed.
 fn target(map: &MapData, world: Vec2, scale: f32) -> Option<(Vec2, bool)> {
     let (_, npos) = map.nearest_node(world, 30.0 * scale)?;
-    let free = map.stops.iter().all(|s| s.pos.distance(npos) >= MIN_GAP);
+    let free = map
+        .stops
+        .iter()
+        .all(|s| s.removed() || s.pos.distance(npos) >= MIN_GAP);
     Some((npos, free))
 }
 
@@ -179,9 +226,85 @@ pub fn station_click(
     };
     eco.money -= BUILD_COST;
     eco.costs += BUILD_COST;
-    st.own.push((npos, name.clone()));
+    st.own.push(OwnStation {
+        pos: npos,
+        name: name.clone(),
+        stop: i,
+        gone: false,
+    });
     spawn_marker(&mut commands, i, npos, &icons);
     eco.say(&real, format!("Built {name}"));
+}
+
+/// The own station under the cursor, if any.
+fn own_at(st: &Stations, world: Vec2, scale: f32) -> Option<usize> {
+    st.own
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| !o.gone && o.pos.distance(world) < 22.0 * scale)
+        .min_by(|a, b| a.1.pos.distance(world).total_cmp(&b.1.pos.distance(world)))
+        .map(|(i, _)| i)
+}
+
+/// Demolish mode: a click removes one of the player's own stations, unless a line still uses it.
+#[allow(clippy::too_many_arguments)]
+pub fn station_demolish(
+    mut commands: Commands,
+    mouse: Res<ButtonInput<MouseButton>>,
+    block: Res<UiBlock>,
+    mut st: ResMut<Stations>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    cam: Single<(&Camera, &GlobalTransform, &Projection), With<MapCamera>>,
+    mut map: ResMut<MapData>,
+    mut queues: ResMut<StopQueues>,
+    mut weights: ResMut<DestWeights>,
+    lines: Res<crate::Lines>,
+    markers: Query<(Entity, &StopMarker)>,
+    mut eco: ResMut<Economy>,
+    real: Res<Time<Real>>,
+) {
+    if !st.demolishing || !mouse.just_pressed(MouseButton::Left) || block.0 {
+        return;
+    }
+    let Some(world) = cursor_world(&window, &cam) else {
+        return;
+    };
+    let Some(k) = own_at(&st, world, ortho_scale(cam.2)) else {
+        eco.say(
+            &real,
+            "Click one of your own stations (only those can be demolished)",
+        );
+        return;
+    };
+    let stop = st.own[k].stop;
+    if let Some(line) = lines
+        .0
+        .iter()
+        .find(|l| l.route.stop_at.iter().flatten().any(|&s| s == stop))
+    {
+        eco.say(
+            &real,
+            format!(
+                "{} is used by line {}: remove the line first",
+                st.own[k].name, line.name
+            ),
+        );
+        return;
+    }
+    tombstone(&mut map, &mut queues, &mut weights, stop);
+    for (e, m) in &markers {
+        if m.0 == stop {
+            commands.entity(e).despawn();
+        }
+    }
+    st.own[k].gone = true;
+    eco.say(
+        &real,
+        format!("Demolished {} (no more upkeep)", st.own[k].name),
+    );
+    if st.own.iter().all(|o| o.gone) {
+        st.demolishing = false;
+    }
 }
 
 pub fn spawn_marker(commands: &mut Commands, i: usize, pos: Vec2, icons: &Icons) {
@@ -219,13 +342,24 @@ pub fn station_preview(
     cam: Single<(&Camera, &GlobalTransform, &Projection), With<MapCamera>>,
     map: Res<MapData>,
 ) {
-    if !st.placing || block.0 {
+    if block.0 {
         return;
     }
     let Some(world) = cursor_world(&window, &cam) else {
         return;
     };
     let scale = ortho_scale(cam.2);
+    if st.demolishing {
+        if let Some(k) = own_at(&st, world, scale) {
+            let c = Color::srgb(0.95, 0.35, 0.3);
+            gizmos.circle_2d(st.own[k].pos, 14.0 * scale, c);
+            gizmos.circle_2d(st.own[k].pos, 4.0 * scale, c);
+        }
+        return;
+    }
+    if !st.placing {
+        return;
+    }
     if let Some((npos, free)) = target(&map, world, scale) {
         let c = if free {
             Color::srgb(0.25, 0.85, 0.45)
@@ -238,11 +372,11 @@ pub fn station_preview(
 }
 
 /// Loading a save: puts the player's stations back before any line is rebuilt.
-pub fn restore(world: &mut World, map: &mut MapData, list: &[(f32, f32, String)]) {
+pub fn restore(world: &mut World, map: &mut MapData, list: &[(f32, f32, String)], gone: &[usize]) {
     let mut st = Stations::default();
     let mut queues = world.remove_resource::<StopQueues>().unwrap_or_default();
     let mut weights = world.remove_resource::<DestWeights>().unwrap_or_default();
-    for (x, y, name) in list {
+    for (k, (x, y, name)) in list.iter().enumerate() {
         if let Some(i) = add_station(
             map,
             &mut queues,
@@ -250,7 +384,16 @@ pub fn restore(world: &mut World, map: &mut MapData, list: &[(f32, f32, String)]
             Vec2::new(*x, *y),
             name.clone(),
         ) {
-            st.own.push((map.stops[i].pos, name.clone()));
+            let demolished = gone.contains(&k);
+            if demolished {
+                tombstone(map, &mut queues, &mut weights, i);
+            }
+            st.own.push(OwnStation {
+                pos: map.stops[i].pos,
+                name: name.clone(),
+                stop: i,
+                gone: demolished,
+            });
         }
     }
     world.insert_resource(queues);
@@ -295,8 +438,33 @@ mod tests {
     fn upkeep_is_per_station() {
         let mut s = Stations::default();
         assert_eq!(s.monthly_cost(), 0.0);
-        s.own.push((Vec2::ZERO, "x".into()));
-        s.own.push((Vec2::X, "y".into()));
+        for (k, p) in [Vec2::ZERO, Vec2::X].into_iter().enumerate() {
+            s.own.push(OwnStation {
+                pos: p,
+                name: "x".into(),
+                stop: k,
+                gone: false,
+            });
+        }
         assert_eq!(s.monthly_cost(), 2.0 * MONTHLY_COST);
+        s.own[0].gone = true;
+        assert_eq!(s.monthly_cost(), MONTHLY_COST);
+    }
+
+    #[test]
+    fn demolished_station_is_switched_off_but_keeps_its_number() {
+        let mut m = map();
+        let mut q = StopQueues::new(&m.stops);
+        let mut w = DestWeights::default();
+        let mid = m.graph[m.graph.node_indices().nth(1).unwrap()];
+        let i = add_station(&mut m, &mut q, &mut w, mid, "My station 1".into()).unwrap();
+        q.waiting[i] = 9.0;
+        tombstone(&mut m, &mut q, &mut w, i);
+        assert!(m.stops[i].removed());
+        assert_eq!(m.stops.len(), 3, "numbers of other stops do not move");
+        assert_eq!(q.waiting[i], 0.0);
+        assert!(!m.stops[0].removed());
+        // nobody wants to travel to it any more
+        assert!(w.0.iter().all(|row| row.get(i).is_none_or(|x| *x == 0.0)));
     }
 }

@@ -461,6 +461,7 @@ fn main() {
                 (
                     stations::station_actions,
                     stations::station_click,
+                    stations::station_demolish,
                     stations::station_preview,
                     research::research_actions,
                     research::research_tick,
@@ -704,6 +705,7 @@ fn update_hover(
         .stops
         .iter()
         .enumerate()
+        .filter(|(_, s)| !s.removed())
         .map(|(i, s)| (i, s.pos.distance(world)))
         .filter(|(_, d)| *d <= reach)
         .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -734,6 +736,9 @@ fn hotkeys(
         }
         if keys.just_pressed(KeyCode::KeyB) && *tool == Tool::Idle {
             events.write(UiAction(Action::ToggleStation));
+        }
+        if keys.just_pressed(KeyCode::KeyX) && *tool == Tool::Idle {
+            events.write(UiAction(Action::ToggleDemolish));
         }
         if keys.just_pressed(KeyCode::Enter) && *tool == Tool::Drawing {
             events.write(UiAction(Action::Finish));

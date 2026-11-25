@@ -198,6 +198,9 @@ pub struct SaveData {
     /// Own bus stations: (x, y, name), in build order.
     #[serde(default)]
     stations: Vec<(f32, f32, String)>,
+    /// Positions in `stations` of the ones that were demolished.
+    #[serde(default)]
+    stations_gone: Vec<usize>,
     /// Research in progress: (tech, finishing game minute).
     #[serde(default)]
     research_active: Option<(usize, f64)>,
@@ -351,7 +354,23 @@ pub fn collect(world: &World) -> Option<SaveData> {
         research_done: research.done.to_vec(),
         stations: world
             .get_resource::<crate::stations::Stations>()
-            .map(|s| s.own.iter().map(|(p, n)| (p.x, p.y, n.clone())).collect())
+            .map(|s| {
+                s.own
+                    .iter()
+                    .map(|o| (o.pos.x, o.pos.y, o.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        stations_gone: world
+            .get_resource::<crate::stations::Stations>()
+            .map(|s| {
+                s.own
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, o)| o.gone)
+                    .map(|(i, _)| i)
+                    .collect()
+            })
             .unwrap_or_default(),
         research_active: research.active,
         placed: Some(
@@ -409,7 +428,7 @@ pub fn apply_pending_load(world: &mut World) {
         return;
     };
     let mut map = world.remove_resource::<MapData>().expect("map");
-    crate::stations::restore(world, &mut map, &data.stations);
+    crate::stations::restore(world, &mut map, &data.stations, &data.stations_gone);
     let mut depot = *world.resource::<crate::ops::DepotSite>();
     if let Some((x, y)) = data.depot {
         if let Some((node, pos)) = map.nearest_node(Vec2::new(x, y), 100.0) {

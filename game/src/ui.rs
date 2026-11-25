@@ -100,6 +100,7 @@ pub enum Action {
     StartDir(u8),
     RetryTiles,
     ToggleStation,
+    ToggleDemolish,
     ResearchTab(u8),
     BusTab(u8),
     Qty(i8),
@@ -930,6 +931,7 @@ pub fn spawn_game_ui(
                     children![
                         button(f, "New line  (N)", Action::NewLine, BtnKind::Primary),
                         button(f, "Station  (B)", Action::ToggleStation, BtnKind::Small),
+                        button(f, "Demolish  (X)", Action::ToggleDemolish, BtnKind::Small),
                         text(
                             f,
                             false,
@@ -1239,6 +1241,7 @@ fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
         Action::ToggleLines => "Lines",
         Action::ToggleResearch => "Research",
         Action::ToggleStation => "Build your own bus station on a road",
+        Action::ToggleDemolish => "Demolish one of your own bus stations",
         Action::Menu => "Menu",
         Action::Finish => "Finish the line",
         Action::Cancel => "Cancel",
