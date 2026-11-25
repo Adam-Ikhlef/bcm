@@ -61,7 +61,10 @@ Bus Manager is free. If you enjoy it you can support development on [Ko-fi](http
 1. Bump `version` in the root `Cargo.toml` (`[workspace.package]`).
 2. `git tag v0.2.0 && git push --tags`
 3. The workflow builds Windows, macOS and Ubuntu and attaches:
-   `busmanager-<os>.zip|tar.gz` (what the installer downloads) and `BusManager-Setup-<os>`.
+   `busmanager-<os>.zip|tar.gz` (what the installer downloads), `BusManager-Setup-<os>`
+   (Windows: Inno Setup wizard) and `BusManager-macos-app.zip` (a ready `BusManager.app` with the icon).
+
+How to put the website online: see [WEBSITE.md](WEBSITE.md).
 
 Installed copies show an **Update** button once a newer release exists.
 
@@ -168,43 +171,43 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 
 ## Roadmap
 
-- [x] 3D depot, fleet shop, bus mods
-- [x] Route-planning screen (waypoints, stop search, live length/time)
-- [x] Timetables, shifts, staff, real OSM routes
-- [x] Depot v2: buy and place parking stands, expand the lot, build rooms (workshop, wash bay, fuel station, break room); a new company starts with no stands and no buses
-- [ ] Shop and Build panels only open from the toolbar (done) · bus stop shelters
-- [ ] Real demand from buildings/POIs and passenger destinations
-- [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
-- [ ] Per-line profit graphs, bus upgrades, loans
-- [x] **External depots** (research): extra depots on any road, indoor parking only (up to 100 stands, bought in blocks of 10, no workshop / wash bay / fuel station there), each with its own name (default: "<nearest city> Depot"). Pick the depot when buying buses; buses start and end their trips at their own depot and are serviced with the main depot's rooms
-- [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
-- [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
-- [x] **Map tiles research**: your starting city is fully available; four researches (North / East / South / West, up to 99 times each) open the next 10 km tile in that direction. Tiles are downloaded in-game with a progress bar and merged into one map with a single depot. Saves from the earlier "Service area" cities still load
-- [x] **Update data** button on every save: downloads fresh OpenStreetMap data for the starting city and every opened tile (the old data is kept if the download fails)
-- [x] Security workflow: weekly `cargo audit`, CodeQL and dependency review on pull requests
-- [x] Windows installer built with Inno Setup (installer/windows/busmanager.iss); Linux and macOS keep the Rust installer
-- [x] Graphics API option (Automatic, Vulkan, DirectX 12) with automatic fallback if it fails to start
-- [x] Day/night cycle in the depot (moving sun, dusk colours, lit lamps and windows)
-- [x] Map look: varied building colours with soft shadows, night tint on the map
-- [x] Buses on the map: rendered 3D pictures of the real bus model in its real paint (line colour shown as an outline), smooth turning; stops without a running line have no demand
+### Done
+
+**Core game**
+- [x] 3D depot with day/night cycle, fleet, bus mods; route-planning screen (waypoints, stop search, live length/time)
+- [x] Timetables, shifts, staff, real OSM bus routes as a starting point
+- [x] Depot v2: free placement of stands and rooms (fuel station, workshop, wash bay, break room), several of each, no starting staff / stands / buses
+- [x] Bus menu (owned / new / second-hand, thumbnails, buy up to 10 with one paint and pattern)
+- [x] Passenger destinations; stops have demand only while a line with a running shift serves them
+- [x] Save/load, game modes (Casual / Realistic / Sandbox), company name and logo, choose your depot location
 - [x] Game pace: 1 game hour = 6 real minutes, speeds x1 / x2 / x3
-- [x] UI polish: soft panel shadows, smooth button hover fades, rolling money counter with green/red flash
-- [x] Sandbox: researches finish instantly
-- [x] Own bus stations: place stops on any road (B), build cost + monthly upkeep, saved with the game
-- [x] Demolish your own stations (X): only stations you built, not while a line uses them; upkeep stops
-- [x] Research menu with categories, picture cards and scrolling (bus menu lists scroll too)
-- [x] **Hover tooltips**: hovering any icon shows a small text saying what it is
-- [x] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
-- [x] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase
-- [x] Build stands, staff rooms and other depot buildings **anywhere** in the depot (free placement)
-- [x] **Depot expansion by research** (flask button: Lot expansion I and II; more research to come)
-- [x] Fuel station, wash bay and workshop are required for every company (one of the first missions); build **more than one** of each
-- [x] A new company starts with **no staff** (like no buses and no stands)
-- [ ] **Better graphics** (lighting, materials, buses, buildings, post-processing)
-- [x] Update checker with changelog
-- [x] Passenger destinations: riders pick destination stops (busier and nearer stops attract more), only board buses that pass them and get off there; hover a stop to see where its riders want to go
-- [x] In-game updater: "Update now" downloads the release, verifies its SHA-256, replaces the game and restarts it
-- [x] Discord Rich Presence (toggle in Options)
-- [x] **Website** on GitHub Pages (`docs/`), served at busmanager.yoz-team.online
-- [x] **Choose your depot location** on the map at the start of a new game; the depot stays marked with an icon all game
-- [x] Save/load, game modes (Casual / Realistic / Sandbox)
+
+**Growth**
+- [x] Research menu (categories, picture cards, scrolling): lot expansion, efficient engines, driver training, city marketing; instant in Sandbox
+- [x] Map tiles: four directional researches (up to 99 each) open 10 km tiles around your starting city, downloaded in-game with a progress bar
+- [x] External depots (research): extra indoor depots, up to 100 stands each, nameable, own buses
+- [x] Own bus stations (B) with upkeep, and demolishing them (X)
+- [x] Update data button for every save (starting city and all tiles)
+
+**Look and feel**
+- [x] Map look (building colours, shadows, night tint), 3D bus pictures in the real paint, smooth turning
+- [x] UI polish (panel shadows, hover fades, rolling money counter), hover tooltips, Graphics API option
+
+**Distribution**
+- [x] Update checker with changelog, in-game updater (SHA-256 checked), Discord Rich Presence
+- [x] Website on GitHub Pages (publishing steps in WEBSITE.md), Windows Inno Setup installer, macOS app icon and `.app` zip
+- [x] CI: fmt/clippy/tests on three systems, security workflow (cargo audit, CodeQL, dependency review)
+
+### Still to do
+
+- [ ] Real demand from buildings / POIs (needs the tile data to carry building types)
+- [ ] Bus stop shelters and other stop upgrades; stop icons / passenger badge polish
+- [ ] Per-line profit graphs, bus upgrades, loans
+- [ ] Casual / Realistic / Sandbox differences beyond wages (difficulty, events)
+- [ ] Customer reviews, social media and contracts using the company name and logo
+- [ ] Tiles: fill the grid between the four directions, tile preview before researching
+- [ ] External depots: dedicated 3D indoor view, per-depot staff
+- [ ] Missions panel state is not saved yet
+- [ ] Refund when demolishing an own station (idea)
+- [ ] Real-GPU checks on Windows / macOS (graphics API fallback, night look, shadows), full play-session balance of pace and passenger rate
+- [ ] Signed installers (Windows code signing, macOS notarisation)

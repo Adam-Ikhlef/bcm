@@ -282,9 +282,13 @@ fn create_shortcuts(version: &str) {
     );
     let _ = fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755));
     let plist = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleName</key><string>{APP_NAME}</string>\n<key>CFBundleExecutable</key><string>BusManager</string>\n<key>CFBundleIdentifier</key><string>com.busmanager.game</string>\n<key>CFBundleVersion</key><string>{version}</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n</dict></plist>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>CFBundleName</key><string>{APP_NAME}</string>\n<key>CFBundleExecutable</key><string>BusManager</string>\n<key>CFBundleIconFile</key><string>icon</string>\n<key>CFBundleDisplayName</key><string>{APP_NAME}</string>\n<key>NSHighResolutionCapable</key><true/>\n<key>CFBundleIdentifier</key><string>com.busmanager.game</string>\n<key>CFBundleVersion</key><string>{version}</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n</dict></plist>\n"
     );
     let _ = fs::write(app.join("Contents/Info.plist"), plist);
+    let res = app.join("Contents/Resources");
+    if fs::create_dir_all(&res).is_ok() {
+        let _ = fs::write(res.join("icon.icns"), include_bytes!("../assets/icon.icns"));
+    }
 }
 
 #[cfg(target_os = "macos")]

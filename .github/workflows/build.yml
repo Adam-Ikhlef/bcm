@@ -51,6 +51,33 @@ jobs:
           tar -czf dist/busmanager-${{ matrix.name }}.tar.gz -C dist/pack busmanager
           cp target/release/busmanager-installer dist/BusManager-Setup-${{ matrix.name }}
 
+      - name: macOS app bundle (with icon)
+        if: runner.os == 'macOS'
+        run: |
+          APP=dist/BusManager.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp target/release/busmanager "$APP/Contents/MacOS/BusManager"
+          cp installer/assets/icon.icns "$APP/Contents/Resources/icon.icns"
+          VERSION=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleName</key><string>Bus Manager</string>
+          <key>CFBundleDisplayName</key><string>Bus Manager</string>
+          <key>CFBundleExecutable</key><string>BusManager</string>
+          <key>CFBundleIconFile</key><string>icon</string>
+          <key>CFBundleIdentifier</key><string>com.busmanager.game</string>
+          <key>CFBundleVersion</key><string>$VERSION</string>
+          <key>CFBundleShortVersionString</key><string>$VERSION</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          chmod +x "$APP/Contents/MacOS/BusManager"
+          (cd dist && zip -qr BusManager-macos-app.zip BusManager.app)
+          rm -rf "$APP"
+
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
