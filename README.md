@@ -30,7 +30,10 @@ Download `BusManager-Setup-<your system>` from the latest GitHub Release and run
 It can **install**, **update**, **repair** and **uninstall** the game, and creates a Start menu /
 applications-menu shortcut.
 
-Uninstall can optionally delete the cities you downloaded.
+On Windows this is a standard setup wizard (Inno Setup) with Start menu and desktop shortcuts and an entry in
+"Apps & features". Your saves and downloaded maps are kept when you uninstall.
+
+Uninstall (Linux / macOS installer) can optionally delete the cities you downloaded.
 
 ## For developers
 
@@ -175,11 +178,16 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Per-line profit graphs, bus upgrades, loans
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
-- [x] **Multi-city research**: "Service area I/II" researches let you add neighbouring cities; all cities load into one big map with merged road networks and a single depot
+- [x] **Map tiles research**: your starting city is fully available; four researches (North / East / South / West, up to 99 times each) open the next 10 km tile in that direction. Tiles are downloaded in-game with a progress bar and merged into one map with a single depot. Saves from the earlier "Service area" cities still load
+- [x] **Update data** button on every save: downloads fresh OpenStreetMap data for the starting city and every opened tile (the old data is kept if the download fails)
+- [x] Security workflow: weekly `cargo audit`, CodeQL and dependency review on pull requests
+- [x] Windows installer built with Inno Setup (installer/windows/busmanager.iss); Linux and macOS keep the Rust installer
 - [x] Graphics API option (Automatic, Vulkan, DirectX 12) with automatic fallback if it fails to start
 - [x] Day/night cycle in the depot (moving sun, dusk colours, lit lamps and windows)
 - [x] Map look: varied building colours with soft shadows, night tint on the map
+- [x] Buses on the map: rendered 3D pictures of the real bus model in its real paint (line colour shown as an outline), smooth turning; stops without a running line have no demand
 - [x] Game pace: 1 game hour = 6 real minutes, speeds x1 / x2 / x3
+- [x] UI polish: soft panel shadows, smooth button hover fades, rolling money counter with green/red flash
 - [x] Sandbox: researches finish instantly
 - [x] Own bus stations: place stops on any road (B), build cost + monthly upkeep, saved with the game
 - [x] Research menu with categories, picture cards and scrolling (bus menu lists scroll too)

@@ -64,6 +64,7 @@ pub fn spawn_staff_ui(mut commands: Commands) {
             Val::Px(82.0),
         ),
         BackgroundColor(style::PANEL),
+        style::panel_shadow(),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(16.0)),
         children![(
@@ -83,6 +84,7 @@ pub fn spawn_staff_ui(mut commands: Commands) {
         Interaction::default(),
         panel_node(14.0, Val::Px(14.0), Val::Auto, Val::Px(340.0), Val::Auto),
         BackgroundColor(style::PANEL),
+        style::panel_shadow(),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(14.0)),
         children![(

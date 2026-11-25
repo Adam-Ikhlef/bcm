@@ -97,10 +97,10 @@ pub enum Action {
     ToggleMissions,
     ToggleResearch,
     StartResearch(u8),
-    FindCities,
+    StartDir(u8),
+    RetryTiles,
     ToggleStation,
     ResearchTab(u8),
-    PickCity(u8),
     BusTab(u8),
     Qty(i8),
     PaintPick(u8),
@@ -133,6 +133,7 @@ pub enum Action {
     DepotConfirm,
     /// Re-download the map data of a cached city (index into the cached list).
     UpdateMap(u8),
+    UpdateSave(u8),
 }
 
 #[derive(Event)]
@@ -224,7 +225,28 @@ fn is_active(action: Action, vtime: &Time<Virtual>, view: View, lines_open: bool
     }
 }
 
+/// Moves `cur` toward `target` smoothly (about 90 ms to settle), so hovering fades instead of snapping.
+fn ease_color(cur: Color, target: Color, dt: f32) -> Color {
+    use bevy::color::Mix;
+    if cur == target {
+        return cur;
+    }
+    let t = (dt * 18.0).clamp(0.0, 1.0);
+    let a = Srgba::from(cur);
+    let b = Srgba::from(target);
+    if (a.red - b.red).abs()
+        + (a.green - b.green).abs()
+        + (a.blue - b.blue).abs()
+        + (a.alpha - b.alpha).abs()
+        < 0.01
+    {
+        return target;
+    }
+    Color::Srgba(a.mix(&b, t))
+}
+
 pub fn button_visuals(
+    real: Res<Time<Real>>,
     vtime: Res<Time<Virtual>>,
     view: Res<View>,
     lines_open: Res<LinesOpen>,
@@ -252,11 +274,13 @@ pub fn button_visuals(
             };
             (b, c.border)
         };
-        if bg.0 != nb {
-            bg.0 = nb;
+        let e = ease_color(bg.0, nb, real.delta_secs());
+        if bg.0 != e {
+            bg.0 = e;
         }
-        if border.0 != nd {
-            border.0 = nd;
+        let e = ease_color(border.0, nd, real.delta_secs());
+        if border.0 != e {
+            border.0 = e;
         }
     }
 }
@@ -574,6 +598,7 @@ pub fn spawn_game_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(14.0)),
             children![
@@ -661,6 +686,7 @@ pub fn spawn_game_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(12.0)),
         ))
@@ -775,6 +801,7 @@ pub fn spawn_game_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(14.0)),
             children![
@@ -812,6 +839,7 @@ pub fn spawn_game_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(12.0)),
         ))
@@ -842,6 +870,7 @@ pub fn spawn_game_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(10.0)),
             children![
@@ -887,6 +916,7 @@ pub fn spawn_game_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(14.0)),
             children![
@@ -980,17 +1010,45 @@ pub fn update_stats(
     fleet: Res<Fleet>,
     buses: Query<&Bus>,
     clock: Res<crate::ops::GameClock>,
+    real: Res<Time<Real>>,
+    mut shown: Local<(f64, f32)>, // (eased money, flash strength; + gain / - loss)
     mut q: Query<(&StatText, &mut Text, &mut TextColor)>,
 ) {
+    // eased money counter: the number rolls toward the real value and flashes green/red
+    let diff = eco.money - shown.0;
+    if diff.abs() > 400.0 || shown.0 == 0.0 {
+        shown.0 = eco.money;
+    } else {
+        let step = diff * (real.delta_secs() as f64 * 8.0).min(1.0);
+        shown.0 += step;
+        if diff.abs() < 0.5 {
+            shown.0 = eco.money;
+        }
+        if diff.abs() > 1.0 {
+            shown.1 = diff.signum() as f32;
+        }
+    }
+    shown.1 *= (1.0 - real.delta_secs() * 2.5).max(0.0);
+    let flash = shown.1;
     let waiting: f32 = queues.waiting.iter().map(|w| w.floor()).sum();
     let bus_count = buses.iter().count();
     let profit = eco.income - eco.costs;
     for (stat, mut t, mut col) in &mut q {
         let (s, c) = match stat.0 {
             Stat::Money => (
-                fmt_money(eco.money),
+                fmt_money(shown.0),
                 if eco.money < 0.0 {
                     style::DANGER
+                } else if flash.abs() > 0.05 {
+                    use bevy::color::Mix;
+                    let tgt = if flash > 0.0 {
+                        style::ACCENT
+                    } else {
+                        style::DANGER
+                    };
+                    Color::Srgba(
+                        Srgba::from(style::TEXT).mix(&Srgba::from(tgt), flash.abs().min(1.0)),
+                    )
                 } else {
                     style::TEXT
                 },

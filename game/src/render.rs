@@ -490,6 +490,13 @@ fn make_badge_icon() -> Image {
 }
 
 pub fn install_icons(world: &mut World) {
+    {
+        let [_, o, _] = make_bus_images();
+        let mut images = world.resource_mut::<Assets<Image>>();
+        let _ = BUS_IMAGES.set(BusImages {
+            outline: images.add(o),
+        });
+    }
     let mut images = world.resource_mut::<Assets<Image>>();
     let icons = Icons {
         stop: images.add(make_stop_icon()),
@@ -614,4 +621,126 @@ pub fn night_tint(
     };
     sprite.color = Color::srgba(0.04, 0.07, 0.22, 0.46 * night);
     sprite.custom_size = Some(window.size() * crate::ortho_scale(proj) * 1.3);
+}
+
+// --- Bus pictures ---------------------------------------------------------------------------
+
+/// Pictures for buses on the map: a tinted body, a flat outline and details (windows, roof).
+#[derive(Clone)]
+pub struct BusImages {
+    pub outline: Handle<Image>,
+}
+
+pub static BUS_IMAGES: std::sync::OnceLock<BusImages> = std::sync::OnceLock::new();
+
+const BW: u32 = 128;
+const BH: u32 = 40;
+
+/// Distance to a rounded box (negative inside); all in pixels.
+fn rbox(x: f32, y: f32, cx: f32, cy: f32, hx: f32, hy: f32, r: f32) -> f32 {
+    let (dx, dy) = ((x - cx).abs() - (hx - r), (y - cy).abs() - (hy - r));
+    dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - r
+}
+
+fn bus_image(f: impl Fn(f32, f32) -> [f32; 4]) -> Image {
+    let mut data = Vec::with_capacity((BW * BH * 4) as usize);
+    for j in 0..BH {
+        for i in 0..BW {
+            let c = f(i as f32 + 0.5, j as f32 + 0.5);
+            data.extend(c.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8));
+        }
+    }
+    let mut img = Image::new(
+        Extent3d {
+            width: BW,
+            height: BH,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    img.sampler = bevy::image::ImageSampler::linear();
+    img
+}
+
+fn cover(d: f32) -> f32 {
+    (0.5 - d).clamp(0.0, 1.0)
+}
+
+fn make_bus_images() -> [Image; 3] {
+    let (w, h) = (BW as f32, BH as f32);
+    let body_sdf =
+        move |x: f32, y: f32| rbox(x, y, w / 2.0, h / 2.0, w / 2.0 - 1.0, h / 2.0 - 1.0, 9.0);
+    // Body: white, slightly darker towards the long edges, so the line colour gets some volume.
+    let body = bus_image(move |x, y| {
+        let a = cover(body_sdf(x, y));
+        let ny = ((y - h / 2.0) / (h / 2.0)).abs();
+        let s = 1.0 - 0.22 * ny * ny;
+        [s, s, s, a]
+    });
+    let outline = bus_image(move |x, y| [1.0, 1.0, 1.0, cover(body_sdf(x, y))]);
+    // Details: windscreen at the front (right side), rear window, roof vents.
+    let detail = bus_image(move |x, y| {
+        let inside = cover(body_sdf(x, y) + 2.0);
+        let wind = cover(rbox(x, y, w - 17.0, h / 2.0, 11.0, h / 2.0 - 5.5, 4.0));
+        let rear = cover(rbox(x, y, 9.0, h / 2.0, 4.0, h / 2.0 - 7.0, 2.0));
+        let vent = cover(rbox(x, y, 48.0, h / 2.0, 14.0, 9.0, 3.0)).max(cover(rbox(
+            x,
+            y,
+            82.0,
+            h / 2.0,
+            14.0,
+            9.0,
+            3.0,
+        )));
+        let mut c = [0.0, 0.0, 0.0, 0.0];
+        if vent > 0.0 {
+            c = [1.0, 1.0, 1.0, 0.30 * vent];
+        }
+        let dark = wind.max(rear * 0.8);
+        if dark > 0.0 {
+            c = [0.08, 0.13, 0.2, 0.88 * dark];
+        }
+        c[3] *= inside;
+        c
+    });
+    [body, outline, detail]
+}
+
+#[cfg(test)]
+mod bus_image_tests {
+    use super::*;
+
+    #[test]
+    fn bus_images_have_the_right_size_and_shape() {
+        let imgs = make_bus_images();
+        for img in &imgs {
+            assert_eq!(img.data.as_ref().unwrap().len(), (BW * BH * 4) as usize);
+        }
+        // The body is opaque in the middle and transparent in the corner.
+        let d = imgs[0].data.as_ref().unwrap();
+        let px = |x: u32, y: u32| d[((y * BW + x) * 4 + 3) as usize];
+        assert_eq!(px(BW / 2, BH / 2), 255);
+        assert_eq!(px(0, 0), 0);
+        if let Ok(path) = std::env::var("BUS_PREVIEW") {
+            // Preview helper: raw RGBA of body+detail composited on grey.
+            let (b, dt) = (
+                imgs[0].data.as_ref().unwrap(),
+                imgs[2].data.as_ref().unwrap(),
+            );
+            let mut out = Vec::new();
+            for i in 0..(BW * BH) as usize {
+                let a = b[i * 4 + 3] as f32 / 255.0;
+                let da = dt[i * 4 + 3] as f32 / 255.0;
+                for c in 0..3 {
+                    let body = [220.0, 60.0, 60.0][c] * b[i * 4 + c] as f32 / 255.0;
+                    let v = body * (1.0 - da) + dt[i * 4 + c] as f32 * da;
+                    out.push((v * a + 120.0 * (1.0 - a)) as u8);
+                }
+            }
+            std::fs::write(path, out).unwrap();
+        }
+    }
 }

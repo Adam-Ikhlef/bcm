@@ -58,6 +58,7 @@ pub fn spawn_minimap(c: &mut ChildSpawnerCommands) {
         },
         Interaction::default(),
         BackgroundColor(style::PANEL),
+        style::panel_shadow(),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(14.0)),
         children![(
@@ -413,6 +414,7 @@ pub fn spawn_missions(c: &mut ChildSpawnerCommands, f: &UiFonts) {
             ..default()
         },
         BackgroundColor(style::PANEL),
+        style::panel_shadow(),
         BorderColor(style::PANEL_BORDER),
         BorderRadius::all(Val::Px(14.0)),
     ))

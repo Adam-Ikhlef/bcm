@@ -43,3 +43,14 @@ pub const CBM_PURPLE: Color = rgb(0x8a, 0x5c, 0xd6);
 pub const CBM_RED: Color = rgb(0xe2, 0x47, 0x5c);
 /// Opaque version of PANEL, for dialogs drawn over other UI.
 pub const PANEL_SOLID: Color = rgb(0x30, 0x39, 0x43);
+
+/// Soft drop shadow under floating panels.
+pub fn panel_shadow() -> BoxShadow {
+    BoxShadow::new(
+        Color::srgba(0.0, 0.0, 0.0, 0.38),
+        Val::Px(0.0),
+        Val::Px(6.0),
+        Val::Px(0.0),
+        Val::Px(14.0),
+    )
+}

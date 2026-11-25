@@ -87,6 +87,10 @@ pub struct Session {
     pub place: Place,
     /// Neighbouring cities unlocked by research, merged into the same map.
     pub extra: Vec<Place>,
+    /// Centre of map tile (0, 0); set when the first tile is opened.
+    pub tile_origin: Option<(f64, f64)>,
+    /// Map tiles opened by research and merged into the map.
+    pub tiles: Vec<(i32, i32)>,
 }
 
 /// Sandbox: the bank account never runs dry.
@@ -153,6 +157,16 @@ pub struct SaveData {
     /// Extra cities merged into the map (empty in older saves).
     #[serde(default)]
     pub extra_cities: Vec<Place>,
+    /// Map tiles: centre of tile (0, 0), tiles opened, researches done per direction (N, E, S, W)
+    /// and the direction in progress.
+    #[serde(default)]
+    pub tile_origin: Option<(f64, f64)>,
+    #[serde(default)]
+    pub tiles: Vec<(i32, i32)>,
+    #[serde(default)]
+    research_dirs: [u8; 4],
+    #[serde(default)]
+    research_dir_active: Option<(usize, f64)>,
     pub clock_abs: f64,
     pub last_day: u64,
     money: f64,
@@ -286,6 +300,10 @@ pub fn collect(world: &World) -> Option<SaveData> {
         mode: session.mode,
         place: session.place.clone(),
         extra_cities: session.extra.clone(),
+        tile_origin: session.tile_origin,
+        tiles: session.tiles.clone(),
+        research_dirs: research.dir_done,
+        research_dir_active: research.dir_active,
         clock_abs: clock.abs,
         last_day: clock.last_day,
         money: eco.money,
@@ -484,6 +502,10 @@ pub fn apply_pending_load(world: &mut World) {
     research.active = data
         .research_active
         .filter(|(i, _)| *i < crate::research::TECHS.len() && !research.done[*i]);
+    research.dir_done = data.research_dirs.map(|n| n.min(crate::research::DIR_MAX));
+    research.dir_active = data
+        .research_dir_active
+        .filter(|(d, _)| *d < 4 && research.dir_done[*d] < crate::research::DIR_MAX);
     world.insert_resource(research);
     world.insert_resource(fleet);
     world.insert_resource(staff);
@@ -639,6 +661,7 @@ fn spawn_modal(commands: &mut Commands, f: &UiFonts) {
                 ..default()
             },
             BackgroundColor(style::PANEL_SOLID),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(14.0)),
             children![

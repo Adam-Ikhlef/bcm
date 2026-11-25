@@ -69,6 +69,75 @@ struct MenuUi;
 #[derive(Component)]
 struct MenuContent;
 #[derive(Component)]
+struct MenuBar;
+#[derive(Component)]
+struct MenuBarFill;
+#[derive(Component)]
+struct MenuBarText;
+
+/// Status line plus the download bar (shown only while a download runs).
+fn status_block(p: &mut ChildSpawnerCommands, f: &UiFonts) {
+    p.spawn((StatusText, text(f, false, 14.0, style::MUTED, "")));
+    p.spawn((
+        MenuBar,
+        Node {
+            display: Display::None,
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            ..default()
+        },
+    ))
+    .with_children(|c| {
+        c.spawn((MenuBarText, text(f, false, 12.0, style::ACCENT, "")));
+        c.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(12.0),
+                ..default()
+            },
+            BackgroundColor(style::DARK),
+            BorderRadius::all(Val::Px(6.0)),
+        ))
+        .with_children(|b| {
+            b.spawn((
+                MenuBarFill,
+                Node {
+                    width: Val::Percent(0.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                BackgroundColor(style::ACCENT),
+                BorderRadius::all(Val::Px(6.0)),
+            ));
+        });
+    });
+}
+
+/// Keeps the download bar in step with the running download.
+fn menu_bar(
+    menu: Res<Menu>,
+    mut bar: Query<&mut Node, (With<MenuBar>, Without<MenuBarFill>)>,
+    mut fill: Query<&mut Node, (With<MenuBarFill>, Without<MenuBar>)>,
+    mut label: Query<&mut Text, With<MenuBarText>>,
+) {
+    let busy = menu.mode == Mode::Busy;
+    let (frac, text) = net::progress();
+    for mut n in &mut bar {
+        n.display = if busy { Display::Flex } else { Display::None };
+    }
+    if !busy {
+        return;
+    }
+    for mut n in &mut fill {
+        n.width = Val::Percent(frac * 100.0);
+    }
+    for mut t in &mut label {
+        if t.0 != text {
+            t.0 = text.clone();
+        }
+    }
+}
+#[derive(Component)]
 struct SearchText;
 #[derive(Component)]
 struct StatusText;
@@ -90,6 +159,7 @@ impl Plugin for MenuPlugin {
                     menu_actions,
                     menu_poll,
                     menu_render,
+                    menu_bar,
                 )
                     .chain()
                     .run_if(in_state(AppState::Menu)),
@@ -360,6 +430,7 @@ pub(crate) fn panel_screen(
                 ..default()
             },
             BackgroundColor(style::PANEL_SOLID),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(18.0)),
         ))
@@ -417,7 +488,7 @@ fn new_game_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
                 ..default()
             },
         ));
-        p.spawn((StatusText, text(f, false, 14.0, style::MUTED, "")));
+        status_block(p, f);
         p.spawn(text(
             f,
             false,
@@ -640,9 +711,9 @@ fn start_download(
     if menu.mode == Mode::Busy {
         return;
     }
-    let extra = load
+    let (extra, tile_origin, tiles) = load
         .as_ref()
-        .map(|d| d.extra_cities.clone())
+        .map(|d| (d.extra_cities.clone(), d.tile_origin, d.tiles.clone()))
         .unwrap_or_default();
     let mode = load.as_ref().map(|d| d.mode).unwrap_or(menu.game_mode);
     menu.pending = Some((
@@ -650,13 +721,21 @@ fn start_download(
             mode,
             place: place.clone(),
             extra: extra.clone(),
+            tile_origin,
+            tiles: tiles.clone(),
         },
         load,
     ));
     let (tx, rx) = channel();
     *inbox.0.lock().unwrap() = Some(rx);
     std::thread::spawn(move || {
-        let _ = tx.send(NetMsg::Map(net::download_region(&place, &extra)));
+        let region = net::Region {
+            home: Some(place),
+            extra,
+            tile_origin,
+            tiles,
+        };
+        let _ = tx.send(NetMsg::Map(net::load_region(&region, false)));
     });
     menu.mode = Mode::Busy;
     menu.is_error = false;
@@ -671,11 +750,33 @@ fn start_update(menu: &mut Menu, inbox: &Inbox, place: Place) {
     let (tx, rx) = channel();
     *inbox.0.lock().unwrap() = Some(rx);
     std::thread::spawn(move || {
+        net::progress_start(1, &format!("Updating {}", net::short_name(&place)));
         let _ = tx.send(NetMsg::Updated(net::refresh_city(&place)));
     });
     menu.mode = Mode::Busy;
     menu.is_error = false;
     menu.status = "Downloading the latest map data (this can take a minute)".into();
+}
+
+/// Updates the map data of a save: its home city, extra cities and every opened tile.
+fn start_update_save(menu: &mut Menu, inbox: &Inbox, data: &crate::save::SaveData) {
+    if menu.mode == Mode::Busy {
+        return;
+    }
+    let region = net::Region {
+        home: Some(data.place.clone()),
+        extra: data.extra_cities.clone(),
+        tile_origin: data.tile_origin,
+        tiles: data.tiles.clone(),
+    };
+    let (tx, rx) = channel();
+    *inbox.0.lock().unwrap() = Some(rx);
+    std::thread::spawn(move || {
+        let _ = tx.send(NetMsg::Updated(net::load_region(&region, true).map(|_| ())));
+    });
+    menu.mode = Mode::Busy;
+    menu.is_error = false;
+    menu.status = "Downloading the latest map data for this save".into();
 }
 
 fn menu_input(mut events: EventReader<KeyboardInput>, mut menu: ResMut<Menu>, inbox: Res<Inbox>) {
@@ -835,6 +936,11 @@ fn menu_actions(
             Action::Cached(i) => {
                 if let Some(p) = menu.cached.get(i).cloned() {
                     start_download(&mut menu, &inbox, p, None);
+                }
+            }
+            Action::UpdateSave(i) => {
+                if let Some(data) = menu.saves.get(i as usize).map(|s| s.data.clone()) {
+                    start_update_save(&mut menu, &inbox, &data);
                 }
             }
             Action::UpdateMap(i) => {
@@ -1147,7 +1253,7 @@ fn mode_screen(root: &mut ChildSpawnerCommands, f: &UiFonts) {
 
 fn load_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, saves: &[crate::save::SaveInfo]) {
     panel_screen(root, f, "Load game", 760.0, Screen::Main, |p| {
-        p.spawn((StatusText, text(f, false, 14.0, style::MUTED, "")));
+        status_block(p, f);
         for (i, s) in saves.iter().take(8).enumerate() {
             let d = &s.data;
             p.spawn((
@@ -1201,6 +1307,12 @@ fn load_screen(root: &mut ChildSpawnerCommands, f: &UiFonts, saves: &[crate::sav
                     "Load",
                     Action::LoadSave(i as u8),
                     BtnKind::Primary,
+                ));
+                r.spawn(button(
+                    f,
+                    "Update data",
+                    Action::UpdateSave(i as u8),
+                    BtnKind::Small,
                 ));
                 r.spawn(button(
                     f,

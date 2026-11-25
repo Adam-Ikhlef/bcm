@@ -118,6 +118,7 @@ pub fn placing_ui(
                 ..default()
             },
             BackgroundColor(style::PANEL_SOLID),
+            style::panel_shadow(),
             BorderColor(style::ACCENT),
             BorderRadius::all(Val::Px(12.0)),
             GlobalZIndex(41),

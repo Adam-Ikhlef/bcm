@@ -523,6 +523,16 @@ fn parse_interval(v: &str) -> Option<u32> {
 
 /// Load an Overpass API JSON response (as downloaded in-game).
 pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
+    load_overpass_in(reader, None)
+}
+
+/// Like `load_overpass`, but for a map tile: `bounds` is (south, west, north, east). A road or
+/// building belongs to the tile that contains its first node, so neighbouring tiles never hold
+/// the same thing twice. Bus routes are skipped (they would be cut at the tile edge).
+pub fn load_overpass_in(
+    reader: impl Read,
+    bounds: Option<[f64; 4]>,
+) -> Result<MapData, Box<dyn Error>> {
     let resp: OverpassResponse = serde_json::from_reader(reader)?;
     let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
     let mut raw_stops: Vec<RawStop> = Vec::new();
@@ -602,6 +612,17 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
             }
             _ => {}
         }
+    }
+    if let Some([s, w, n, e]) = bounds {
+        let inside = |id: &i64| {
+            nodes
+                .get(id)
+                .is_some_and(|&(lat, lon)| lat >= s && lat < n && lon >= w && lon < e)
+        };
+        ways.retain(|(ids, _, _)| ids.first().is_some_and(inside));
+        areas.retain(|(ids, _)| ids.first().is_some_and(inside));
+        raw_stops.retain(|(id, ..)| inside(id));
+        raw_routes.clear();
     }
     build(&nodes, raw_stops, raw_routes, &ways, &areas)
 }

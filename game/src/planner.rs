@@ -125,6 +125,7 @@ pub fn spawn_planner_ui(mut commands: Commands) {
                 ..default()
             },
             BackgroundColor(style::PANEL),
+            style::panel_shadow(),
             BorderColor(style::PANEL_BORDER),
             BorderRadius::all(Val::Px(14.0)),
         ))

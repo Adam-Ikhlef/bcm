@@ -1,4 +1,5 @@
 mod bus_menu;
+mod busicon;
 mod busmodel;
 mod company;
 mod demand;
@@ -398,6 +399,10 @@ fn main() {
         Update,
         depot::menu_backdrop_camera.run_if(in_state(AppState::Menu)),
     )
+    .add_systems(
+        Update,
+        (busicon::preview, busicon::start_jobs, busicon::run_jobs).chain(),
+    )
     .add_systems(OnExit(AppState::Menu), depot::menu_backdrop_exit)
     .add_systems(
         OnExit(AppState::Playing),
@@ -460,6 +465,8 @@ fn main() {
                     research::research_actions,
                     research::research_tick,
                     research::expansion_poll,
+                    research::tiles_start,
+                    research::update_tile_bar,
                     research::research_ui,
                 )
                     .chain(),
@@ -932,13 +939,30 @@ fn spawn_passengers(
     mut queues: ResMut<StopQueues>,
     weights: Res<DestWeights>,
     research: Res<research::Research>,
+    buses: Query<&dispatch::Bus>,
 ) {
     let dt = time.delta_secs();
     let tod = ops::demand_factor(clock.minute_of_day());
+    // Only stops that a running bus (a shift in progress) serves create demand.
+    let mut served = vec![false; map.stops.len()];
+    for b in &buses {
+        for s in b.route.stop_at.iter().flatten() {
+            if let Some(x) = served.get_mut(*s) {
+                *x = true;
+            }
+        }
+    }
     for (i, s) in map.stops.iter().enumerate() {
         let (Some(slots), Some(w)) = (queues.by_dest.get_mut(i), weights.0.get(i)) else {
             continue;
         };
+        if !served[i] {
+            // Nobody comes without a line; the people already waiting give up.
+            let keep = (1.0 - 0.2 * dt).max(0.0);
+            slots.iter_mut().for_each(|x| *x *= keep);
+            queues.waiting[i] = slots.iter().sum();
+            continue;
+        }
         let new = s.demand * PASSENGER_RATE * tod * dt * research.demand_mult();
         for (slot, share) in slots.iter_mut().zip(w) {
             *slot += new * share;
@@ -951,6 +975,12 @@ fn spawn_passengers(
         }
         queues.waiting[i] = slots.iter().sum();
     }
+}
+
+/// Turns a bus smoothly towards the direction of travel (corners are no longer snapped).
+fn turn_towards(tf: &mut Transform, dir: Vec2) {
+    let target = Quat::from_rotation_z(dir.y.atan2(dir.x));
+    tf.rotation = tf.rotation.slerp(target, 0.25);
 }
 
 /// Moves `pos` along `path` (from index `pi`) by up to `remaining` meters. Returns the distance driven.
@@ -966,12 +996,12 @@ fn follow(tf: &mut Transform, path: &[Vec2], pi: &mut usize, remaining: &mut f32
             traveled += d;
             *pi += 1;
             if d > 1e-3 {
-                tf.rotation = Quat::from_rotation_z(to.y.atan2(to.x));
+                turn_towards(tf, to);
             }
         } else {
             let dir = to / d;
             tf.translation += (dir * *remaining).extend(0.0);
-            tf.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
+            turn_towards(tf, dir);
             traveled += *remaining;
             *remaining = 0.0;
         }

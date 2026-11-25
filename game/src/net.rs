@@ -5,6 +5,10 @@ use std::{
     fs::{self, File},
     io::BufReader,
     path::PathBuf,
+    sync::{
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        Mutex,
+    },
     time::Duration,
 };
 
@@ -109,24 +113,216 @@ pub fn cached_cities() -> Vec<Place> {
     found.into_iter().take(5).map(|(_, p)| p).collect()
 }
 
-fn overpass_query(area_id: i64) -> String {
+/// The things the game needs, limited by an Overpass filter such as `(area.a)` or `(s,w,n,e)`.
+fn selectors(filter: &str, routes: bool) -> String {
+    let route_line = if routes {
+        format!("rel[\"route\"=\"bus\"]{filter};")
+    } else {
+        String::new()
+    };
     format!(
-        "[out:json][timeout:240];\
-         area(id:{area_id})->.a;\
-         (\
-         way[\"highway\"~\"^({})$\"](area.a);\
-         node[\"highway\"=\"bus_stop\"](area.a);\
-         node[\"public_transport\"=\"platform\"][\"bus\"=\"yes\"](area.a);\
-         rel[\"route\"=\"bus\"](area.a);\
-         way[\"building\"](area.a);\
-         way[\"natural\"~\"^(water|wood|scrub|grassland)$\"](area.a);\
-         way[\"waterway\"=\"riverbank\"](area.a);\
-         way[\"leisure\"~\"^(park|garden|playground|recreation_ground|nature_reserve)$\"](area.a);\
-         way[\"landuse\"~\"^(grass|forest|meadow|recreation_ground|village_green|cemetery|reservoir|basin)$\"](area.a);\
-         );\
-         out body;>;out skel qt;",
+        "way[\"highway\"~\"^({})$\"]{filter};\
+         node[\"highway\"=\"bus_stop\"]{filter};\
+         node[\"public_transport\"=\"platform\"][\"bus\"=\"yes\"]{filter};\
+         {route_line}\
+         way[\"building\"]{filter};\
+         way[\"natural\"~\"^(water|wood|scrub|grassland)$\"]{filter};\
+         way[\"waterway\"=\"riverbank\"]{filter};\
+         way[\"leisure\"~\"^(park|garden|playground|recreation_ground|nature_reserve)$\"]{filter};\
+         way[\"landuse\"~\"^(grass|forest|meadow|recreation_ground|village_green|cemetery|reservoir|basin)$\"]{filter};",
         osm::DRIVABLE.join("|")
     )
+}
+
+fn overpass_query(area_id: i64) -> String {
+    format!(
+        "[out:json][timeout:240];area(id:{area_id})->.a;({});out body;>;out skel qt;",
+        selectors("(area.a)", true)
+    )
+}
+
+// --- Progress of the current download (read by the UI) -------------------------------------------
+
+struct Progress {
+    label: Mutex<String>,
+    step: AtomicU32,
+    steps: AtomicU32,
+    bytes: AtomicU64,
+    total: AtomicU64,
+}
+
+static PROGRESS: Progress = Progress {
+    label: Mutex::new(String::new()),
+    step: AtomicU32::new(0),
+    steps: AtomicU32::new(1),
+    bytes: AtomicU64::new(0),
+    total: AtomicU64::new(0),
+};
+
+/// Starts a new download made of `steps` parts (cities / tiles).
+pub fn progress_start(steps: u32, label: &str) {
+    PROGRESS.steps.store(steps.max(1), Ordering::Relaxed);
+    PROGRESS.step.store(0, Ordering::Relaxed);
+    progress_part(label);
+}
+
+fn progress_part(label: &str) {
+    PROGRESS.bytes.store(0, Ordering::Relaxed);
+    PROGRESS.total.store(0, Ordering::Relaxed);
+    *PROGRESS.label.lock().unwrap() = label.to_string();
+}
+
+fn progress_done_part() {
+    PROGRESS.step.fetch_add(1, Ordering::Relaxed);
+    PROGRESS.bytes.store(0, Ordering::Relaxed);
+    PROGRESS.total.store(0, Ordering::Relaxed);
+}
+
+/// (fraction 0..1, text such as "Tile North 3 - 12.4 MB") of the running download.
+pub fn progress() -> (f32, String) {
+    let steps = PROGRESS.steps.load(Ordering::Relaxed).max(1) as f32;
+    let step = PROGRESS.step.load(Ordering::Relaxed) as f32;
+    let bytes = PROGRESS.bytes.load(Ordering::Relaxed);
+    let total = PROGRESS.total.load(Ordering::Relaxed);
+    let mb = bytes as f32 / 1_048_576.0;
+    let part = if total > 0 {
+        (bytes as f32 / total as f32).min(0.98)
+    } else {
+        // Overpass does not announce the size: approach 95% slowly.
+        0.95 * (1.0 - (-mb / 25.0).exp())
+    };
+    let label = PROGRESS.label.lock().unwrap().clone();
+    let text = if bytes > 0 {
+        format!("{label} - {mb:.1} MB")
+    } else {
+        format!("{label} - waiting for the server")
+    };
+    (((step + part) / steps).clamp(0.0, 1.0), text)
+}
+
+/// Copies a response to `out` and counts the bytes for the progress bar.
+fn copy_counting(resp: ureq::Response, out: &mut impl std::io::Write) -> std::io::Result<()> {
+    use std::io::Read;
+    if let Some(len) = resp
+        .header("Content-Length")
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        PROGRESS.total.store(len, Ordering::Relaxed);
+    }
+    let mut reader = resp.into_reader();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            return Ok(());
+        }
+        out.write_all(&buf[..n])?;
+        PROGRESS.bytes.fetch_add(n as u64, Ordering::Relaxed);
+    }
+}
+
+// --- Map tiles: 10 km squares around the home city, opened by research -----------------------------
+
+/// Side of one tile in meters.
+pub const TILE_SIZE: f64 = 10_000.0;
+
+/// (south, west, north, east) of tile (x, y); tile (0, 0) is centred on `origin`.
+pub fn tile_bounds(origin: (f64, f64), x: i32, y: i32) -> [f64; 4] {
+    let dlat = TILE_SIZE / 110_540.0;
+    let dlon = TILE_SIZE / (111_320.0 * origin.0.to_radians().cos());
+    let (cx, cy) = (x as f64, y as f64);
+    [
+        origin.0 + (cy - 0.5) * dlat,
+        origin.1 + (cx - 0.5) * dlon,
+        origin.0 + (cy + 0.5) * dlat,
+        origin.1 + (cx + 0.5) * dlon,
+    ]
+}
+
+fn tile_path(origin: (f64, f64), x: i32, y: i32) -> PathBuf {
+    cache_dir().join(format!(
+        "tile_{}_{}_{}_{}_v3.json",
+        (origin.0 * 1e4).round() as i64,
+        (origin.1 * 1e4).round() as i64,
+        x,
+        y
+    ))
+}
+
+fn tile_query(origin: (f64, f64), x: i32, y: i32, cities: &[&Place]) -> String {
+    let [s, w, n, e] = tile_bounds(origin, x, y);
+    let areas: String = cities
+        .iter()
+        .map(|p| format!("area(id:{});", p.osm_id + 3_600_000_000))
+        .collect();
+    // Everything in the square, except what the already loaded cities contain.
+    format!(
+        "[out:json][timeout:240];({areas})->.h;({})->.all;({})->.inh;(.all;-.inh;)->.res;\
+         .res out body;.res >;out skel qt;",
+        selectors(&format!("({s:.6},{w:.6},{n:.6},{e:.6})"), false),
+        selectors("(area.h)", false),
+    )
+}
+
+fn post_query(query: &str, dest: &std::path::Path) -> Result<(), String> {
+    let mut last_err = String::from("no Overpass server configured");
+    for url in OVERPASS_SERVERS {
+        match agent().post(url).send_form(&[("data", query)]) {
+            Ok(resp) => {
+                let tmp = dest.with_extension("part");
+                let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
+                copy_counting(resp, &mut f).map_err(|e| e.to_string())?;
+                fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+            Err(e) => last_err = format!("{url}: {e}"),
+        }
+    }
+    Err(last_err)
+}
+
+fn load_tile_file(path: &std::path::Path, bounds: [f64; 4]) -> Result<MapData, String> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    osm::load_overpass_in(BufReader::new(file), Some(bounds)).map_err(|e| e.to_string())
+}
+
+/// Loads tile (x, y) from the cache or downloads it. A tile without any road is an empty
+/// stretch of land: that is an error the caller can show.
+fn download_tile(
+    origin: (f64, f64),
+    x: i32,
+    y: i32,
+    cities: &[&Place],
+    refresh: bool,
+) -> Result<MapData, String> {
+    fs::create_dir_all(cache_dir()).map_err(|e| e.to_string())?;
+    let path = tile_path(origin, x, y);
+    let bounds = tile_bounds(origin, x, y);
+    if refresh || !path.exists() {
+        let fresh = path.with_extension("new");
+        post_query(&tile_query(origin, x, y, cities), &fresh)?;
+        match load_tile_file(&fresh, bounds) {
+            Ok(map) => {
+                fs::rename(&fresh, &path).map_err(|e| e.to_string())?;
+                return Ok(map);
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&fresh);
+                return Err(format!("could not use downloaded tile data: {e}"));
+            }
+        }
+    }
+    load_tile_file(&path, bounds).inspect_err(|_| {
+        let _ = fs::remove_file(&path);
+    })
+}
+
+/// A tile that is only countryside has no roads; the game then simply has nothing to add there.
+fn tile_or_empty(r: Result<MapData, String>) -> Result<Option<MapData>, String> {
+    match r {
+        Err(e) if e.contains("no drivable roads") => Ok(None),
+        other => other.map(Some),
+    }
 }
 
 fn fetch(place: &Place, dest: &std::path::Path) -> Result<(), String> {
@@ -137,7 +333,7 @@ fn fetch(place: &Place, dest: &std::path::Path) -> Result<(), String> {
             Ok(resp) => {
                 let tmp = dest.with_extension("part");
                 let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
-                std::io::copy(&mut resp.into_reader(), &mut f).map_err(|e| e.to_string())?;
+                copy_counting(resp, &mut f).map_err(|e| e.to_string())?;
                 fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
                 return Ok(());
             }
@@ -170,95 +366,82 @@ pub fn download_city(place: &Place) -> Result<MapData, String> {
     }
 }
 
-/// Loads the home city and merges the extra cities into one big map.
-pub fn download_region(home: &Place, extra: &[Place]) -> Result<MapData, String> {
-    let mut map = download_city(home)?;
-    for p in extra {
-        let other = download_city(p).map_err(|e| format!("{}: {e}", short_name(p)))?;
+/// What a game needs on the map: the home city, legacy extra cities and the opened tiles.
+#[derive(Clone, Debug, Default)]
+pub struct Region {
+    pub home: Option<Place>,
+    pub extra: Vec<Place>,
+    /// Centre of tile (0, 0); set when the first tile is opened.
+    pub tile_origin: Option<(f64, f64)>,
+    pub tiles: Vec<(i32, i32)>,
+}
+
+impl Region {
+    fn cities(&self) -> Vec<&Place> {
+        self.home.iter().chain(self.extra.iter()).collect()
+    }
+
+    fn parts(&self) -> u32 {
+        (self.cities().len() + self.tiles.len()) as u32
+    }
+}
+
+/// `refresh` downloads everything again (Update data); the old files stay until the new ones work.
+pub fn load_region(region: &Region, refresh: bool) -> Result<MapData, String> {
+    let home = region.home.as_ref().ok_or("no home city")?;
+    progress_start(region.parts(), &format!("Downloading {}", short_name(home)));
+    let mut map = load_city(home, refresh)?;
+    progress_done_part();
+    for p in &region.extra {
+        progress_part(&format!("Downloading {}", short_name(p)));
+        let other = load_city(p, refresh).map_err(|e| format!("{}: {e}", short_name(p)))?;
         map.merge(other);
+        progress_done_part();
+    }
+    if let Some(origin) = region.tile_origin {
+        let cities = region.cities();
+        for &(x, y) in &region.tiles {
+            progress_part(&format!("Downloading {}", tile_name(x, y)));
+            let t = tile_or_empty(download_tile(origin, x, y, &cities, refresh))
+                .map_err(|e| format!("{}: {e}", tile_name(x, y)))?;
+            if let Some(t) = t {
+                map.merge(t);
+            }
+            progress_done_part();
+        }
     }
     Ok(map)
 }
 
-pub fn short_name(p: &Place) -> &str {
-    p.display_name.split(',').next().unwrap_or("").trim()
-}
-
-#[derive(Deserialize)]
-struct NearbyResponse {
-    elements: Vec<NearbyEl>,
-}
-
-#[derive(Deserialize)]
-struct NearbyEl {
-    id: i64,
-    #[serde(default)]
-    tags: std::collections::HashMap<String, String>,
-    center: Option<NearbyCenter>,
-}
-
-#[derive(Deserialize)]
-struct NearbyCenter {
-    lat: f64,
-    lon: f64,
-}
-
-/// Turns an Overpass answer into places, nearest to `(lat, lon)` first, without the excluded ones.
-fn parse_nearby(json: &str, lat: f64, lon: f64, exclude: &[Place]) -> Result<Vec<Place>, String> {
-    let resp: NearbyResponse = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let mut found: Vec<(f64, Place)> = Vec::new();
-    for el in resp.elements {
-        let Some(name) = el.tags.get("name").cloned() else {
-            continue;
-        };
-        if exclude.iter().any(|p| p.osm_id == el.id) || found.iter().any(|(_, p)| p.osm_id == el.id)
-        {
-            continue;
-        }
-        let d = el.center.map_or(f64::MAX, |c| {
-            let dx = (c.lon - lon) * 111.32 * lat.to_radians().cos();
-            let dy = (c.lat - lat) * 110.54;
-            (dx * dx + dy * dy).sqrt()
-        });
-        let label = match el
-            .tags
-            .get("is_in:country")
-            .or_else(|| el.tags.get("addr:country"))
-        {
-            Some(c) => format!("{name}, {c}"),
-            None => name,
-        };
-        found.push((
-            d,
-            Place {
-                osm_type: "relation".into(),
-                osm_id: el.id,
-                display_name: label,
-            },
+/// "Tile North 3" for tile (0, 3), "Tile East 2 / North 1" for (2, 1).
+pub fn tile_name(x: i32, y: i32) -> String {
+    let mut parts = Vec::new();
+    if y != 0 {
+        parts.push(format!(
+            "{} {}",
+            if y > 0 { "North" } else { "South" },
+            y.abs()
         ));
     }
-    found.sort_by(|a, b| a.0.total_cmp(&b.0));
-    Ok(found.into_iter().take(8).map(|(_, p)| p).collect())
+    if x != 0 {
+        parts.push(format!(
+            "{} {}",
+            if x > 0 { "East" } else { "West" },
+            x.abs()
+        ));
+    }
+    format!("Tile {}", parts.join(" / "))
 }
 
-/// Towns and cities around a point (up to 60 km), as places that can be downloaded.
-pub fn nearby_cities(lat: f64, lon: f64, exclude: &[Place]) -> Result<Vec<Place>, String> {
-    let query = format!(
-        "[out:json][timeout:60];\
-         rel[\"boundary\"=\"administrative\"][\"admin_level\"~\"^(7|8)$\"][\"name\"](around:60000,{lat},{lon});\
-         out tags center 40;"
-    );
-    let mut last_err = String::from("no Overpass server configured");
-    for url in OVERPASS_SERVERS {
-        match agent().post(url).send_form(&[("data", query.as_str())]) {
-            Ok(resp) => {
-                let text = resp.into_string().map_err(|e| e.to_string())?;
-                return parse_nearby(&text, lat, lon, exclude);
-            }
-            Err(e) => last_err = format!("{url}: {e}"),
-        }
+fn load_city(place: &Place, refresh: bool) -> Result<MapData, String> {
+    if refresh {
+        refresh_city(place)?;
     }
-    Err(last_err)
+    download_city(place)
+}
+
+pub fn short_name(p: &Place) -> &str {
+    p.display_name.split(',').next().unwrap_or("").trim()
 }
 
 /// Downloads fresh OpenStreetMap data for an already downloaded city. The old data stays in place
@@ -290,20 +473,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nearby_places_are_sorted_and_filtered() {
+    fn tiles_are_10_km_squares_next_to_each_other() {
+        let o = (33.0, -7.0);
+        let c = tile_bounds(o, 0, 0);
+        let n = tile_bounds(o, 0, 1);
+        let e = tile_bounds(o, 1, 0);
+        assert!(
+            (n[0] - c[2]).abs() < 1e-9,
+            "north tile starts where the centre ends"
+        );
+        assert!(
+            (e[1] - c[3]).abs() < 1e-9,
+            "east tile starts where the centre ends"
+        );
+        let height_m = (c[2] - c[0]) * 110_540.0;
+        let width_m = (c[3] - c[1]) * 111_320.0 * 33f64.to_radians().cos();
+        assert!((height_m - TILE_SIZE).abs() < 1.0 && (width_m - TILE_SIZE).abs() < 1.0);
+    }
+
+    #[test]
+    fn tile_names_say_where_they_are() {
+        assert_eq!(tile_name(0, 3), "Tile North 3");
+        assert_eq!(tile_name(-2, 0), "Tile West 2");
+        assert_eq!(tile_name(2, -1), "Tile South 1 / East 2");
+    }
+
+    #[test]
+    fn a_road_belongs_to_the_tile_with_its_first_node() {
+        // two roads: one starts inside the tile and ends outside, one starts outside
         let json = r#"{"elements":[
-            {"type":"relation","id":3,"tags":{"name":"Far"},"center":{"lat":33.5,"lon":-7.0}},
-            {"type":"relation","id":2,"tags":{"name":"Near"},"center":{"lat":33.1,"lon":-7.0}},
-            {"type":"relation","id":1,"tags":{"name":"Home"},"center":{"lat":33.0,"lon":-7.0}},
-            {"type":"relation","id":4,"tags":{},"center":{"lat":33.0,"lon":-7.0}}
+            {"type":"way","id":1,"nodes":[1,2],"tags":{"highway":"residential"}},
+            {"type":"way","id":2,"nodes":[3,4],"tags":{"highway":"residential"}},
+            {"type":"node","id":1,"lat":33.01,"lon":-7.0},
+            {"type":"node","id":2,"lat":33.07,"lon":-7.0},
+            {"type":"node","id":3,"lat":33.06,"lon":-7.0},
+            {"type":"node","id":4,"lat":33.01,"lon":-7.0}
         ]}"#;
+        let south_tile = [32.95, -7.1, 33.05, -6.9];
+        let north_tile = [33.05, -7.1, 33.15, -6.9];
+        let a = osm::load_overpass_in(json.as_bytes(), Some(south_tile)).unwrap();
+        let b = osm::load_overpass_in(json.as_bytes(), Some(north_tile)).unwrap();
+        assert_eq!(a.roads.len(), 1);
+        assert_eq!(b.roads.len(), 1);
+        let all = osm::load_overpass(json.as_bytes()).unwrap();
+        assert_eq!(all.roads.len(), 2);
+    }
+
+    #[test]
+    fn tile_queries_leave_out_the_loaded_cities() {
         let home = Place {
             osm_type: "relation".into(),
-            osm_id: 1,
+            osm_id: 7,
             display_name: "Home".into(),
         };
-        let r = parse_nearby(json, 33.0, -7.0, &[home]).unwrap();
-        let names: Vec<_> = r.iter().map(|p| p.display_name.as_str()).collect();
-        assert_eq!(names, ["Near", "Far"]);
+        let q = tile_query((33.0, -7.0), 0, 1, &[&home]);
+        assert!(q.contains("area(id:3600000007)"));
+        assert!(q.contains("(.all;-.inh;)"));
+        assert!(!q.contains("route"), "tiles skip bus route relations");
     }
 }

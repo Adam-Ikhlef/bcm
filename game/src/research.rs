@@ -1,7 +1,7 @@
 //! Research: pay money, wait some game days, unlock things. For now it gates the lot expansions.
 
 use std::sync::{
-    mpsc::{channel, Receiver, Sender},
+    mpsc::{channel, Receiver},
     Mutex,
 };
 
@@ -15,7 +15,7 @@ use bevy::{
 };
 
 use crate::{
-    net::{self, Place},
+    net,
     ops::GameClock,
     osm::MapData,
     save::Session,
@@ -37,7 +37,7 @@ pub struct Tech {
 
 pub const CATEGORIES: [&str; 3] = ["Depot", "Operations", "Growth"];
 
-pub const TECHS: [Tech; 7] = [
+pub const TECHS: [Tech; 5] = [
     Tech {
         name: "Lot expansion I",
         blurb: "Lets you buy the next part of your lot",
@@ -78,36 +78,46 @@ pub const TECHS: [Tech; 7] = [
         needs: None,
         cat: 2,
     },
-    Tech {
-        name: "Service area I",
-        blurb: "Lets you add one neighbouring city to your map",
-        cost: 10_000.0,
-        days: 5.0,
-        needs: Some(4),
-        cat: 2,
-    },
-    Tech {
-        name: "Service area II",
-        blurb: "Lets you add a second neighbouring city",
-        cost: 18_000.0,
-        days: 7.0,
-        needs: Some(5),
-        cat: 2,
-    },
 ];
 
 /// Indices of the techs with an effect on the simulation.
 const ENGINES: usize = 2;
 const TRAINING: usize = 3;
 const MARKETING: usize = 4;
-const AREA_I: usize = 5;
-const AREA_II: usize = 6;
+
+/// The four map directions that can be researched, up to `DIR_MAX` times each.
+pub const DIRS: [&str; 4] = ["North", "East", "South", "West"];
+pub const DIR_MAX: u8 = 99;
+
+/// Tile opened by the `k`-th research (1-based) in direction `d`: a line going out from the home tile.
+pub fn dir_tile(d: usize, k: u8) -> (i32, i32) {
+    let k = k as i32;
+    match d {
+        0 => (0, k),
+        1 => (k, 0),
+        2 => (0, -k),
+        _ => (-k, 0),
+    }
+}
+
+/// Cost and duration of the next tile research in a direction that already has `n` tiles.
+pub fn dir_cost(n: u8) -> f64 {
+    4_000.0 + 600.0 * n as f64
+}
+
+pub fn dir_days(n: u8) -> f64 {
+    (2.0 + 0.25 * n as f64).min(14.0)
+}
 
 #[derive(Resource, Default)]
 pub struct Research {
     pub done: [bool; TECHS.len()],
     /// Tech being researched and the game minute it finishes.
     pub active: Option<(usize, f64)>,
+    /// Map tiles researched per direction (North, East, South, West).
+    pub dir_done: [u8; 4],
+    /// Direction being researched and the game minute it finishes.
+    pub dir_active: Option<(usize, f64)>,
     pub open: bool,
     /// Selected category tab.
     pub tab: usize,
@@ -119,11 +129,6 @@ impl Research {
     /// Research needed before the lot can go from `level` to `level + 1`.
     pub fn lot_unlocked(&self, level: usize) -> bool {
         self.done.get(level).copied().unwrap_or(true)
-    }
-
-    /// How many neighbouring cities may be added in total.
-    pub fn city_slots(&self) -> usize {
-        self.done[AREA_I] as usize + self.done[AREA_II] as usize
     }
 
     pub fn fuel_mult(&self) -> f32 {
@@ -167,32 +172,70 @@ pub struct ResearchModal;
 pub enum ExpState {
     #[default]
     Idle,
-    Searching,
-    List(Vec<Place>),
-    Downloading(String),
+    Downloading,
     Error(String),
 }
 
 enum ExpMsg {
-    Cities(Result<Vec<Place>, String>),
-    Region(Place, Result<MapData, String>),
+    /// (origin of tile (0,0), all tiles of the region, merged map)
+    Region((f64, f64), Vec<(i32, i32)>, Result<MapData, String>),
 }
 
-/// Adding a neighbouring city: suggestions, download and the reload with the merged map.
+/// Downloading the tiles that research has opened, and the reload with the merged map.
 #[derive(Resource, Default)]
 pub struct Expansion {
     pub state: ExpState,
     rx: Mutex<Option<Receiver<ExpMsg>>>,
 }
 
-/// Starts a background job and remembers where its answer will arrive.
-fn spawn_job(exp: &Expansion, job: impl FnOnce(Sender<ExpMsg>) + Send + 'static) {
-    let (tx, rx) = channel();
-    *exp.rx.lock().unwrap() = Some(rx);
-    std::thread::spawn(move || job(tx));
+/// Tiles that were researched but are not on the map yet.
+pub fn pending_tiles(r: &Research, session: &Session) -> Vec<(i32, i32)> {
+    let mut v = Vec::new();
+    for d in 0..4 {
+        for k in 1..=r.dir_done[d] {
+            let t = dir_tile(d, k);
+            if !session.tiles.contains(&t) {
+                v.push(t);
+            }
+        }
+    }
+    v
 }
 
-/// Picks up finished downloads. A new city reloads the game with the merged map.
+/// Starts the download of pending tiles (also again after an error when the player asks).
+pub fn tiles_start(
+    mut research: ResMut<Research>,
+    session: Res<Session>,
+    map: Res<MapData>,
+    mut exp: ResMut<Expansion>,
+) {
+    if !matches!(exp.state, ExpState::Idle) {
+        return;
+    }
+    let pending = pending_tiles(&research, &session);
+    if pending.is_empty() {
+        return;
+    }
+    let origin = session.tile_origin.unwrap_or(map.origin);
+    let mut tiles = session.tiles.clone();
+    tiles.extend(pending);
+    let region = net::Region {
+        home: Some(session.place.clone()),
+        extra: session.extra.clone(),
+        tile_origin: Some(origin),
+        tiles: tiles.clone(),
+    };
+    exp.state = ExpState::Downloading;
+    let (tx, rx) = channel();
+    *exp.rx.lock().unwrap() = Some(rx);
+    std::thread::spawn(move || {
+        let r = net::load_region(&region, false);
+        let _ = tx.send(ExpMsg::Region(origin, tiles, r));
+    });
+    research.version += 1;
+}
+
+/// Picks up finished downloads. New tiles reload the game with the merged map.
 pub fn expansion_poll(world: &mut World) {
     let msg = {
         let exp = world.resource::<Expansion>();
@@ -203,15 +246,16 @@ pub fn expansion_poll(world: &mut World) {
     let mut exp = world.resource_mut::<Expansion>();
     *exp.rx.lock().unwrap() = None;
     match msg {
-        ExpMsg::Cities(Ok(list)) if list.is_empty() => {
-            exp.state = ExpState::Error("No neighbouring cities found nearby".into());
+        ExpMsg::Region(_, _, Err(e)) => {
+            exp.state = ExpState::Error(format!("Download failed: {e}"))
         }
-        ExpMsg::Cities(Ok(list)) => exp.state = ExpState::List(list),
-        ExpMsg::Cities(Err(e)) => exp.state = ExpState::Error(format!("Search failed: {e}")),
-        ExpMsg::Region(_, Err(e)) => exp.state = ExpState::Error(format!("Download failed: {e}")),
-        ExpMsg::Region(place, Ok(map)) => {
+        ExpMsg::Region(origin, tiles, Ok(map)) => {
             exp.state = ExpState::Idle;
-            world.resource_mut::<Session>().extra.push(place);
+            {
+                let mut session = world.resource_mut::<Session>();
+                session.tile_origin = Some(origin);
+                session.tiles = tiles;
+            }
             if let Some(data) = crate::save::collect(world) {
                 let _ = crate::save::write_save(&data, true);
                 world.insert_resource(crate::save::PendingLoad(Some(data)));
@@ -233,7 +277,6 @@ pub fn research_actions(
     clock: Res<GameClock>,
     real: Res<Time<Real>>,
     session: Res<Session>,
-    map: Res<MapData>,
     mut exp: ResMut<Expansion>,
 ) {
     for UiAction(a) in events.read() {
@@ -242,37 +285,39 @@ pub fn research_actions(
                 research.tab = t as usize;
                 research.version += 1;
             }
-            Action::FindCities => {
-                if research.city_slots() <= session.extra.len()
-                    || matches!(exp.state, ExpState::Searching | ExpState::Downloading(_))
-                {
+            Action::RetryTiles => {
+                if matches!(exp.state, ExpState::Error(_)) {
+                    exp.state = ExpState::Idle;
+                    research.version += 1;
+                }
+            }
+            Action::StartDir(d) => {
+                let d = d as usize;
+                if d >= 4 || research.active.is_some() || research.dir_active.is_some() {
                     continue;
                 }
-                let (lat, lon) = map.origin;
-                let mut exclude = session.extra.clone();
-                exclude.push(session.place.clone());
-                exp.state = ExpState::Searching;
-                spawn_job(&exp, move |tx| {
-                    let _ = tx.send(ExpMsg::Cities(net::nearby_cities(lat, lon, &exclude)));
-                });
-                research.version += 1;
-            }
-            Action::PickCity(i) => {
-                let ExpState::List(list) = &exp.state else {
+                let n = research.dir_done[d];
+                if n >= DIR_MAX || !matches!(exp.state, ExpState::Idle) {
                     continue;
-                };
-                let Some(place) = list.get(i as usize).cloned() else {
+                }
+                let (cost, days) = (dir_cost(n), dir_days(n));
+                if eco.money < cost {
+                    eco.say(
+                        &real,
+                        format!("Not enough money: this research costs {}", fmt_money(cost)),
+                    );
                     continue;
-                };
-                let home = session.place.clone();
-                let mut extra = session.extra.clone();
-                extra.push(place.clone());
-                exp.state = ExpState::Downloading(net::short_name(&place).to_string());
-                spawn_job(&exp, move |tx| {
-                    let r = net::download_region(&home, &extra);
-                    let _ = tx.send(ExpMsg::Region(place, r));
-                });
+                }
+                if session.mode == crate::save::GameMode::Sandbox {
+                    research.dir_done[d] += 1;
+                    research.version += 1;
+                    continue;
+                }
+                eco.money -= cost;
+                eco.costs += cost;
+                research.dir_active = Some((d, clock.abs + days * 1440.0));
                 research.version += 1;
+                eco.say(&real, format!("Research started: map tile {}", DIRS[d]));
             }
             Action::ToggleResearch => {
                 research.open = !research.open;
@@ -281,7 +326,7 @@ pub fn research_actions(
             Action::StartResearch(i) => {
                 let i = i as usize;
                 let Some(t) = TECHS.get(i) else { continue };
-                if research.done[i] || research.active.is_some() {
+                if research.done[i] || research.active.is_some() || research.dir_active.is_some() {
                     continue;
                 }
                 if t.needs.is_some_and(|n| !research.done[n]) {
@@ -327,6 +372,17 @@ pub fn research_tick(
             research.active = None;
             research.version += 1;
             eco.say(&real, format!("Research finished: {}", TECHS[i].name));
+        }
+    }
+    if let Some((d, end)) = research.dir_active {
+        if clock.abs >= end {
+            research.dir_done[d] += 1;
+            research.dir_active = None;
+            research.version += 1;
+            eco.say(
+                &real,
+                format!("Research finished: map tile {} (downloading)", DIRS[d]),
+            );
         }
     }
 }
@@ -614,6 +670,7 @@ pub fn research_ui(
                     ..default()
                 },
                 BackgroundColor(style::PANEL_SOLID),
+                style::panel_shadow(),
                 BorderColor(style::ACCENT),
                 BorderRadius::all(Val::Px(14.0)),
             ))
@@ -648,34 +705,38 @@ pub fn research_ui(
                         row.spawn(button(f, *c, Action::ResearchTab(i as u8), kind));
                     }
                 });
-                p.spawn(crate::ui::scroll_box(1, Val::Px(300.0), 10.0))
-                    .with_children(|sc| {
-                        sc.spawn(Node {
-                            flex_wrap: FlexWrap::Wrap,
-                            flex_shrink: 0.0,
-                            align_content: AlignContent::FlexStart,
-                            column_gap: Val::Px(10.0),
-                            row_gap: Val::Px(10.0),
-                            ..default()
-                        })
-                        .with_children(|grid| {
-                            for (i, t) in TECHS.iter().enumerate() {
-                                if t.cat == research.tab {
-                                    tech_card(
-                                        grid,
-                                        f,
-                                        &research,
-                                        &clock,
-                                        session.mode == crate::save::GameMode::Sandbox,
-                                        i,
-                                        handles[i].clone(),
-                                    );
-                                }
+                p.spawn(crate::ui::scroll_box(
+                    1,
+                    Val::Px(if research.tab == 2 { 215.0 } else { 300.0 }),
+                    10.0,
+                ))
+                .with_children(|sc| {
+                    sc.spawn(Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        flex_shrink: 0.0,
+                        align_content: AlignContent::FlexStart,
+                        column_gap: Val::Px(10.0),
+                        row_gap: Val::Px(10.0),
+                        ..default()
+                    })
+                    .with_children(|grid| {
+                        for (i, t) in TECHS.iter().enumerate() {
+                            if t.cat == research.tab {
+                                tech_card(
+                                    grid,
+                                    f,
+                                    &research,
+                                    &clock,
+                                    session.mode == crate::save::GameMode::Sandbox,
+                                    i,
+                                    handles[i].clone(),
+                                );
                             }
-                        });
+                        }
                     });
+                });
                 if research.tab == 2 {
-                    cities_section(p, f, &research, &session, &exp);
+                    tiles_section(p, f, &research, &clock, &session, &exp);
                 }
             });
         });
@@ -742,86 +803,240 @@ fn tech_card(
     });
 }
 
-fn cities_section(
+/// A thin progress bar: `fraction` of `width` is filled.
+fn bar(p: &mut ChildSpawnerCommands, width: Val, fraction: f32, color: Color) {
+    p.spawn((
+        Node {
+            width,
+            height: Val::Px(8.0),
+            ..default()
+        },
+        BackgroundColor(style::DARK),
+        BorderRadius::all(Val::Px(4.0)),
+    ))
+    .with_children(|b| {
+        b.spawn((
+            Node {
+                width: Val::Percent(fraction.clamp(0.0, 1.0) * 100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(color),
+            BorderRadius::all(Val::Px(4.0)),
+        ));
+    });
+}
+
+#[derive(Component)]
+pub struct TileBarFill;
+
+#[derive(Component)]
+pub struct TileBarText;
+
+/// Keeps the download bar of the tiles in step with the running download.
+pub fn update_tile_bar(
+    mut fill: Query<&mut Node, With<TileBarFill>>,
+    mut label: Query<&mut Text, With<TileBarText>>,
+) {
+    let (frac, text) = net::progress();
+    for mut n in &mut fill {
+        n.width = Val::Percent(frac * 100.0);
+    }
+    for mut t in &mut label {
+        if t.0 != text {
+            t.0 = text.clone();
+        }
+    }
+}
+
+fn tiles_section(
     p: &mut ChildSpawnerCommands,
     f: &UiFonts,
     r: &Research,
+    clock: &GameClock,
     session: &Session,
     exp: &Expansion,
 ) {
-    let mut names: Vec<&str> = vec![net::short_name(&session.place)];
-    names.extend(session.extra.iter().map(net::short_name));
+    let instant = session.mode == crate::save::GameMode::Sandbox;
     p.spawn(text(
         f,
         true,
-        13.0,
+        14.0,
         style::TEXT,
-        format!("Your cities: {}", names.join(", ")),
+        format!(
+            "Map tiles: {}, plus {} opened (10 km squares)",
+            net::short_name(&session.place),
+            r.dir_done.iter().map(|n| *n as u32).sum::<u32>()
+        ),
     ));
-    if r.city_slots() <= session.extra.len() {
-        let msg = if r.done[AREA_I] {
-            "Research the next service area to add another city."
-        } else {
-            "Research Service area I to connect a neighbouring city. Road networks are merged into one map."
-        };
-        p.spawn(text(f, false, 12.0, style::MUTED, msg));
-        return;
-    }
+    p.spawn(text(
+        f,
+        false,
+        11.0,
+        style::MUTED,
+        "Each research opens the next tile in that direction and downloads it. Your city is always fully available.",
+    ));
+    let busy = r.active.is_some() || r.dir_active.is_some() || !matches!(exp.state, ExpState::Idle);
+    p.spawn(Node {
+        column_gap: Val::Px(18.0),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(7.0),
+            ..default()
+        })
+        .with_children(|col| {
+            for d in 0..4 {
+                let n = r.dir_done[d];
+                col.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                })
+                .with_children(|line| {
+                    line.spawn(Node {
+                        width: Val::Px(52.0),
+                        ..default()
+                    })
+                    .with_children(|w| {
+                        w.spawn(text(f, true, 13.0, style::TEXT, DIRS[d]));
+                    });
+                    bar(
+                        line,
+                        Val::Px(110.0),
+                        n as f32 / DIR_MAX as f32,
+                        style::ACCENT,
+                    );
+                    line.spawn(Node {
+                        width: Val::Px(52.0),
+                        ..default()
+                    })
+                    .with_children(|w| {
+                        w.spawn(text(
+                            f,
+                            false,
+                            12.0,
+                            style::MUTED,
+                            format!("{n} / {DIR_MAX}"),
+                        ));
+                    });
+                    if let Some((_, end)) = r.dir_active.filter(|(a, _)| *a == d) {
+                        line.spawn(text(
+                            f,
+                            false,
+                            11.0,
+                            style::ACCENT,
+                            format!("{:.1} days left", ((end - clock.abs) / 1440.0).max(0.0)),
+                        ));
+                    } else if n >= DIR_MAX {
+                        line.spawn(text(f, true, 12.0, style::MUTED, "Done"));
+                    } else if busy {
+                        line.spawn(text(f, false, 11.0, style::MUTED, "Busy"));
+                    } else {
+                        let label = if instant {
+                            "Research (Sandbox: instant)".to_string()
+                        } else {
+                            format!(
+                                "Research  {}  ({:.1} d)",
+                                fmt_money(dir_cost(n)),
+                                dir_days(n)
+                            )
+                        };
+                        line.spawn(button(f, label, Action::StartDir(d as u8), BtnKind::Small));
+                    }
+                });
+            }
+        });
+        // Little map of the opened tiles around the home city.
+        let radius = (r.dir_done.iter().copied().max().unwrap_or(0) as i32).clamp(2, 4);
+        row.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
+            ..default()
+        })
+        .with_children(|grid| {
+            for y in (-radius..=radius).rev() {
+                grid.spawn(Node {
+                    column_gap: Val::Px(2.0),
+                    ..default()
+                })
+                .with_children(|line| {
+                    for x in -radius..=radius {
+                        let opened = (x, y) == (0, 0) || session.tiles.contains(&(x, y));
+                        let queued = (0..4)
+                            .any(|d| (1..=r.dir_done[d]).any(|k| dir_tile(d, k) == (x, y)))
+                            && !opened;
+                        let color = if (x, y) == (0, 0) {
+                            style::CBM_BLUE
+                        } else if opened {
+                            style::ACCENT
+                        } else if queued {
+                            style::AMBER
+                        } else {
+                            style::DARK
+                        };
+                        line.spawn((
+                            Node {
+                                width: Val::Px(16.0),
+                                height: Val::Px(16.0),
+                                ..default()
+                            },
+                            BackgroundColor(color),
+                            BorderRadius::all(Val::Px(3.0)),
+                        ));
+                    }
+                });
+            }
+        });
+    });
     match &exp.state {
-        ExpState::Idle => {
-            p.spawn(button(
-                f,
-                "Add a neighbouring city",
-                Action::FindCities,
-                BtnKind::Primary,
-            ));
-        }
-        ExpState::Searching => {
-            p.spawn(text(
-                f,
-                false,
-                12.0,
-                style::ACCENT,
-                "Looking for cities nearby",
-            ));
-        }
-        ExpState::Downloading(name) => {
-            p.spawn(text(
-                f,
-                false,
-                12.0,
-                style::ACCENT,
-                format!("Downloading {name} and joining the road networks. The game reloads when it is done."),
-            ));
+        ExpState::Idle => {}
+        ExpState::Downloading => {
+            p.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            })
+            .with_children(|c| {
+                c.spawn((
+                    TileBarText,
+                    text(f, false, 12.0, style::ACCENT, "Downloading"),
+                ));
+                c.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(12.0),
+                        ..default()
+                    },
+                    BackgroundColor(style::DARK),
+                    BorderRadius::all(Val::Px(6.0)),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        TileBarFill,
+                        Node {
+                            width: Val::Percent(0.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(style::ACCENT),
+                        BorderRadius::all(Val::Px(6.0)),
+                    ));
+                });
+                c.spawn(text(
+                    f,
+                    false,
+                    11.0,
+                    style::MUTED,
+                    "The game reloads when the download is done.",
+                ));
+            });
         }
         ExpState::Error(e) => {
             p.spawn(text(f, false, 12.0, style::DANGER, e.clone()));
-            p.spawn(button(f, "Try again", Action::FindCities, BtnKind::Small));
-        }
-        ExpState::List(list) => {
-            p.spawn(text(
-                f,
-                false,
-                12.0,
-                style::MUTED,
-                "Choose the city to add (your depot stays where it is):",
-            ));
-            p.spawn(Node {
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(8.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            })
-            .with_children(|w| {
-                for (i, c) in list.iter().enumerate().take(6) {
-                    w.spawn(button(
-                        f,
-                        net::short_name(c),
-                        Action::PickCity(i as u8),
-                        BtnKind::Small,
-                    ));
-                }
-            });
+            p.spawn(button(f, "Try again", Action::RetryTiles, BtnKind::Small));
         }
     }
 }
@@ -878,5 +1093,16 @@ mod tests {
     fn second_lot_research_needs_the_first() {
         assert_eq!(TECHS[1].needs, Some(0));
         assert!(TECHS[0].needs.is_none());
+    }
+
+    #[test]
+    fn tile_researches_open_tiles_in_a_line() {
+        assert_eq!(dir_tile(0, 1), (0, 1));
+        assert_eq!(dir_tile(0, 3), (0, 3));
+        assert_eq!(dir_tile(1, 2), (2, 0));
+        assert_eq!(dir_tile(2, 1), (0, -1));
+        assert_eq!(dir_tile(3, 4), (-4, 0));
+        assert!(dir_cost(98) > dir_cost(0));
+        assert!(dir_days(98) <= 14.0);
     }
 }

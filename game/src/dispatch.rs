@@ -156,6 +156,28 @@ pub fn start_return(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn bus_sprite(icon: Handle<Image>, length: f32) -> Sprite {
+    Sprite {
+        image: icon,
+        custom_size: Some(crate::busicon::map_size(length)),
+        ..default()
+    }
+}
+
+/// A rounded plate in the line colour under the bus, so lines stay recognisable.
+fn outline_sprite(color: Color, length: f32) -> Sprite {
+    let size = crate::busicon::map_size(length) * Vec2::new(0.96, 0.9) + Vec2::new(3.0, 3.0);
+    match crate::render::BUS_IMAGES.get() {
+        Some(i) => Sprite {
+            image: i.outline.clone(),
+            color: color.with_alpha(0.9),
+            custom_size: Some(size),
+            ..default()
+        },
+        None => Sprite::from_color(color, size),
+    }
+}
+
 pub fn spawn_bus(
     commands: &mut Commands,
     line_idx: usize,
@@ -167,6 +189,7 @@ pub fn spawn_bus(
     wait_until: f64,
     depot: &DepotSite,
     fuel_mult: f32,
+    icon: Handle<Image>,
 ) {
     let (start, path, phase) = match &line.depot_leg {
         Some(leg) if leg.len() >= 2 => (depot.pos, leg.clone(), Phase::Approach),
@@ -193,11 +216,11 @@ pub fn spawn_bus(
             retire: false,
             since: 0.0,
         },
-        Sprite::from_color(line.color, Vec2::new(spec.length * 2.1, 10.0)),
+        bus_sprite(icon, spec.length),
         Transform::from_translation(start.extend(4.0)),
         GameWorld,
         children![(
-            Sprite::from_color(Color::WHITE, Vec2::new(spec.length * 2.1 + 5.0, 15.0)),
+            outline_sprite(line.color, spec.length),
             Transform::from_xyz(0.0, 0.0, -0.1),
         )],
     ));
@@ -231,6 +254,11 @@ pub fn advance_departures(
         };
         let eff = staff.get(d.driver).map(|x| x.efficiency()).unwrap_or(1.0);
         if let Some(line) = lines.0.get(d.line) {
+            let spec = &catalog.0[spec_idx];
+            let (rgb, pattern) = match fleet.get(id).and_then(|b| b.paint) {
+                Some(p) => (p.rgb, p.pattern),
+                None => (crate::fleet::Paint::of_color(spec.color), 0),
+            };
             spawn_bus(
                 &mut commands,
                 d.line,
@@ -238,10 +266,11 @@ pub fn advance_departures(
                 id,
                 eff,
                 d.driver,
-                &catalog.0[spec_idx],
+                spec,
                 d.wait_until,
                 &depot,
                 research.fuel_mult(),
+                crate::busicon::icon_for(spec_idx, rgb, pattern),
             );
         }
         if let Some(b) = fleet.get_mut(id) {

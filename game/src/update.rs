@@ -254,6 +254,7 @@ fn show_modal(
                 ..default()
             },
             BackgroundColor(style::PANEL_SOLID),
+            style::panel_shadow(),
             BorderColor(style::ACCENT),
             BorderRadius::all(Val::Px(14.0)),
             children![
