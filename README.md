@@ -176,6 +176,7 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Real demand from buildings/POIs and passenger destinations
 - [ ] Timetables and bus stops from `public_transport=platform` / bus route relations
 - [ ] Per-line profit graphs, bus upgrades, loans
+- [x] **External depots** (research): extra depots on any road, indoor parking only (up to 100 stands, bought in blocks of 10, no workshop / wash bay / fuel station there), each with its own name (default: "<nearest city> Depot"). Pick the depot when buying buses; buses start and end their trips at their own depot and are serviced with the main depot's rooms
 - [ ] **Own bus stations and waypoints** instead of the map ones (own stations have a monthly cost)
 - [ ] **Updating map data** of a downloaded city to the latest OpenStreetMap data
 - [x] **Map tiles research**: your starting city is fully available; four researches (North / East / South / West, up to 99 times each) open the next 10 km tile in that direction. Tiles are downloaded in-game with a progress bar and merged into one map with a single depot. Saves from the earlier "Service area" cities still load
@@ -192,7 +193,6 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [x] Own bus stations: place stops on any road (B), build cost + monthly upkeep, saved with the game
 - [x] Demolish your own stations (X): only stations you built, not while a line uses them; upkeep stops
 - [x] Research menu with categories, picture cards and scrolling (bus menu lists scroll too)
-- [ ] **External depots research** (idea): more than one depot, also in the same city
 - [x] **Hover tooltips**: hovering any icon shows a small text saying what it is
 - [x] **Bus menu** replacing the shop: owned buses, new buses (with a thumbnail of how the bus looks), second-hand buses
 - [x] Buy up to **10 buses at once**; choose paint and textures once when buying, applied to every bus of that purchase

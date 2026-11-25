@@ -537,6 +537,9 @@ pub struct FleetBus {
     /// Line index while driving, `None` while parked in the depot.
     pub line: Option<usize>,
     pub bay: Option<Cell>,
+    /// Where the bus lives: 0 = the main depot, k = external depot k (1-based). Buses of
+    /// external depots never have a bay: they park inside the depot building.
+    pub home: usize,
     /// The line this bus is assigned to (it leaves the depot for that line's departures).
     pub assigned: Option<usize>,
     pub depart: Option<Depart>,
@@ -578,6 +581,8 @@ pub struct Fleet {
     pub placed: Vec<Placed>,
     /// Lot expansion level (0..=2), see `LOT_LEVEL_COLS`.
     pub lot_level: u8,
+    /// Stands of each external depot (kept in step with `ExtDepots`).
+    pub ext_stands: Vec<u8>,
 }
 
 fn plate_for(id: u32) -> String {
@@ -633,7 +638,7 @@ impl Fleet {
             if self.buses.iter().any(|b| b.bay == Some((p.c, p.r))) {
                 return Err("A bus is parked on this stand");
             }
-            if self.buses.len() >= self.stand_count() {
+            if self.count_at(0) >= self.stand_count() {
                 return Err("Park fewer buses first: every bus needs its own stand");
             }
         }
@@ -686,12 +691,31 @@ impl Fleet {
             .find(|s| !self.buses.iter().any(|x| x.bay == Some(*s)))
     }
 
+    /// Parking places of a depot (0 = main depot, k = external depot k).
+    pub fn capacity(&self, home: usize) -> usize {
+        if home == 0 {
+            self.stand_count()
+        } else {
+            self.ext_stands.get(home - 1).copied().unwrap_or(0) as usize
+        }
+    }
+
+    pub fn count_at(&self, home: usize) -> usize {
+        self.buses.iter().filter(|b| b.home == home).count()
+    }
+
+    pub fn free_at(&self, home: usize) -> usize {
+        self.capacity(home).saturating_sub(self.count_at(home))
+    }
+
     /// Adds a new bus parked in a free bay.
+    #[cfg(test)]
     pub fn add(&mut self, spec: usize) -> Option<u32> {
         self.add_custom(spec, None, 100.0, 100.0, 100.0)
     }
 
     /// Adds a bus with a paint job and wear (second-hand buses).
+    #[cfg(test)]
     pub fn add_custom(
         &mut self,
         spec: usize,
@@ -700,10 +724,27 @@ impl Fleet {
         condition: f32,
         clean: f32,
     ) -> Option<u32> {
-        if self.buses.len() >= self.stand_count() {
+        self.add_at(0, spec, paint, fuel, condition, clean)
+    }
+
+    /// Adds a bus to depot `home`; `None` when that depot has no free stand.
+    pub fn add_at(
+        &mut self,
+        home: usize,
+        spec: usize,
+        paint: Option<Paint>,
+        fuel: f32,
+        condition: f32,
+        clean: f32,
+    ) -> Option<u32> {
+        if self.free_at(home) == 0 {
             return None;
         }
-        let bay = self.free_bay()?;
+        let bay = if home == 0 {
+            Some(self.free_bay()?)
+        } else {
+            None
+        };
         let id = self.next_id;
         self.next_id += 1;
         self.buses.push(FleetBus {
@@ -715,7 +756,8 @@ impl Fleet {
             condition,
             clean,
             line: None,
-            bay: Some(bay),
+            bay,
+            home,
             assigned: None,
             depart: None,
         });
@@ -749,10 +791,15 @@ impl Fleet {
                 b.assigned == Some(line)
                     && b.line.is_none()
                     && b.depart.is_none()
-                    && b.bay.is_some()
+                    && (b.bay.is_some() || b.home > 0)
                     && !b.needs_service()
             })
             .map(|b| b.id)
+    }
+
+    #[cfg(test)]
+    fn assign_for_test(&mut self, id: u32) {
+        self.get_mut(id).unwrap().assigned = Some(0);
     }
 
     pub fn assigned_count(&self, line: usize) -> usize {
@@ -771,10 +818,10 @@ impl Fleet {
 
     /// Bring a bus back to the depot.
     pub fn park(&mut self, id: u32) {
-        let bay = self.free_bay();
+        let free = self.free_bay();
         if let Some(b) = self.get_mut(id) {
             b.line = None;
-            b.bay = bay;
+            b.bay = if b.home == 0 { free } else { None };
         }
         self.version += 1;
     }
@@ -874,5 +921,30 @@ mod tests {
         assert!(parse_hex("#1f6fd9").is_some());
         assert!(parse_hex("1f6fd9").is_some());
         assert!(parse_hex("blue").is_none());
+    }
+
+    #[test]
+    fn external_depot_buses_have_no_bay_and_own_capacity() {
+        let mut f = Fleet::default();
+        stands(&mut f, 2);
+        f.ext_stands = vec![2];
+        let a = f.add_at(1, 0, None, 100.0, 100.0, 100.0).unwrap();
+        assert_eq!(f.get(a).unwrap().bay, None);
+        assert_eq!(f.get(a).unwrap().home, 1);
+        assert!(f.add_at(1, 0, None, 100.0, 100.0, 100.0).is_some());
+        assert!(
+            f.add_at(1, 0, None, 100.0, 100.0, 100.0).is_none(),
+            "depot 1 is full"
+        );
+        assert_eq!(f.free_at(0), 2, "the main depot is not affected");
+        assert!(f.add(0).is_some() && f.add(0).is_some() && f.add(0).is_none());
+        f.assign_for_test(a);
+        assert_eq!(
+            f.ready_for(0),
+            Some(a),
+            "parked bus of an external depot is ready"
+        );
+        f.park(a);
+        assert_eq!(f.get(a).unwrap().bay, None);
     }
 }

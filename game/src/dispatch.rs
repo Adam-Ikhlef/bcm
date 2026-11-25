@@ -79,6 +79,7 @@ pub fn daily_rollover(
     fleet: Res<crate::fleet::Fleet>,
     research: Res<crate::research::Research>,
     stations: Res<crate::stations::Stations>,
+    ext: Res<crate::extdepot::ExtDepots>,
 ) {
     let day = clock.day();
     if day <= clock.last_day {
@@ -93,7 +94,7 @@ pub fn daily_rollover(
     let wages =
         staff.daily_wages() * session.mode.wage_factor() * break_room * research.wage_mult();
     let monthly = if (day + 1) % 30 == 0 {
-        stations.monthly_cost()
+        stations.monthly_cost() + ext.monthly_cost()
     } else {
         0.0
     };
@@ -188,10 +189,11 @@ pub fn spawn_bus(
     spec: &BusSpec,
     wait_until: f64,
     depot: &DepotSite,
+    leg: Option<Vec<Vec2>>,
     fuel_mult: f32,
     icon: Handle<Image>,
 ) {
-    let (start, path, phase) = match &line.depot_leg {
+    let (start, path, phase) = match &leg {
         Some(leg) if leg.len() >= 2 => (depot.pos, leg.clone(), Phase::Approach),
         _ => (line.route.path[0], Vec::new(), Phase::Wait),
     };
@@ -226,6 +228,12 @@ pub fn spawn_bus(
     ));
 }
 
+/// Road from an external depot to the first stop of a line.
+fn ext_leg(map: &MapData, site: &DepotSite, line: &BusLine) -> Option<Vec<Vec2>> {
+    let (first, _) = map.nearest_node(line.route.path[0], 30.0)?;
+    map.leg(site.node, first)
+}
+
 /// Advances the depot exit animation; when finished the bus appears on the map.
 #[allow(clippy::too_many_arguments)]
 pub fn advance_departures(
@@ -237,6 +245,8 @@ pub fn advance_departures(
     catalog: Res<Catalog>,
     depot: Res<DepotSite>,
     research: Res<crate::research::Research>,
+    map: Res<MapData>,
+    ext: Res<crate::extdepot::ExtDepots>,
 ) {
     let dt = time.delta_secs();
     let mut done: Vec<(u32, Depart)> = Vec::new();
@@ -259,6 +269,13 @@ pub fn advance_departures(
                 Some(p) => (p.rgb, p.pattern),
                 None => (crate::fleet::Paint::of_color(spec.color), 0),
             };
+            let home = fleet.get(id).map(|b| b.home).unwrap_or(0);
+            let site = ext.site(home, &depot);
+            let leg = if home == 0 {
+                line.depot_leg.clone()
+            } else {
+                ext_leg(&map, &site, line)
+            };
             spawn_bus(
                 &mut commands,
                 d.line,
@@ -268,7 +285,8 @@ pub fn advance_departures(
                 d.driver,
                 spec,
                 d.wait_until,
-                &depot,
+                &site,
+                leg,
                 research.fuel_mult(),
                 crate::busicon::icon_for(spec_idx, rgb, pattern),
             );
@@ -293,10 +311,19 @@ pub fn dispatch_trips(
     mut eco: ResMut<Economy>,
     real: Res<Time<Real>>,
     mut buses: Query<&mut Bus>,
+    depot: Res<DepotSite>,
+    ext: Res<crate::extdepot::ExtDepots>,
 ) {
     let now = clock.abs;
     for (li, line) in lines.0.iter().enumerate() {
-        let lead = line.lead_minutes();
+        // Buses of external depots may have a longer way to the first stop.
+        let far = fleet
+            .buses
+            .iter()
+            .filter(|b| b.home > 0 && b.assigned == Some(li))
+            .map(|b| ext.site(b.home, &depot).pos.distance(line.route.path[0]) * 1.4)
+            .fold(0.0f32, f32::max);
+        let lead = line.lead_minutes() + (far / BUS_SPEED) as f64 * TIME_SCALE as f64 / 60.0;
         for d in line.timetable.departures(now - 30.0, now + lead + 1.0) {
             let key = (li, d as u64);
             if trips.done.contains_key(&key) {
@@ -342,10 +369,13 @@ pub fn dispatch_trips(
             let driver_id = staff.free_on_shift(minute);
             match (bus_id, driver_id) {
                 (Some(bid), Some(did)) => {
-                    let Some(bay) = fleet.get(bid).and_then(|b| b.bay) else {
-                        continue;
+                    let Some(b) = fleet.get(bid) else { continue };
+                    let total = match b.bay {
+                        Some(bay) => depot::exit_length(bay, &fleet) / EXIT_SPEED,
+                        // external depots: the bus simply rolls out of the building
+                        None if b.home > 0 => 2.0,
+                        None => continue,
                     };
-                    let total = depot::exit_length(bay, &fleet) / EXIT_SPEED;
                     if let Some(b) = fleet.get_mut(bid) {
                         b.depart = Some(Depart {
                             line: li,
@@ -404,6 +434,7 @@ pub fn layover_manager(
     lines: Res<Lines>,
     map: Res<MapData>,
     depot_site: Res<DepotSite>,
+    ext: Res<crate::extdepot::ExtDepots>,
     mut commands: Commands,
     mut fleet: ResMut<Fleet>,
     mut staff: ResMut<Staff>,
@@ -427,8 +458,10 @@ pub fn layover_manager(
             .is_empty();
         let rested = now - bus.since >= 1.0;
         if bus.retire || shift_over || (no_work && rested) {
-            let home = line.home_leg.as_ref();
-            if !start_return(&mut bus, tf.translation.truncate(), &map, &depot_site, home) {
+            let h = fleet.get(bus.fleet).map(|b| b.home).unwrap_or(0);
+            let site = ext.site(h, &depot_site);
+            let home = if h == 0 { line.home_leg.as_ref() } else { None };
+            if !start_return(&mut bus, tf.translation.truncate(), &map, &site, home) {
                 // No road to the depot: the bus is simply put away.
                 commands.entity(entity).despawn();
                 let (fid, did) = (bus.fleet, bus.driver);

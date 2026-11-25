@@ -5,6 +5,7 @@ mod company;
 mod demand;
 mod depot;
 mod dispatch;
+mod extdepot;
 mod fleet;
 mod lot;
 mod menu;
@@ -293,6 +294,7 @@ fn main() {
     .init_resource::<stations::Stations>()
     .init_resource::<bus_menu::BuyState>()
     .init_resource::<bus_menu::Market>()
+    .init_resource::<extdepot::ExtDepots>()
     .init_resource::<bus_menu::Thumbs>()
     .init_resource::<sidebar::Missions>()
     .init_resource::<save::PendingLoad>()
@@ -402,6 +404,18 @@ fn main() {
     .add_systems(
         Update,
         (busicon::preview, busicon::start_jobs, busicon::run_jobs).chain(),
+    )
+    .add_systems(
+        Update,
+        (
+            extdepot::ext_actions,
+            extdepot::ext_typing,
+            extdepot::ext_place,
+            extdepot::ext_names,
+            extdepot::ext_markers,
+            extdepot::ext_ui,
+        )
+            .run_if(in_state(AppState::Playing)),
     )
     .add_systems(OnExit(AppState::Menu), depot::menu_backdrop_exit)
     .add_systems(
@@ -718,8 +732,9 @@ fn hotkeys(
     tool: Res<Tool>,
     view: Res<View>,
     search: Res<planner::Search>,
+    ext: Res<extdepot::ExtDepots>,
 ) {
-    if search.focus {
+    if search.focus || ext.renaming.is_some() {
         return;
     }
     if keys.just_pressed(KeyCode::Tab) {
@@ -1027,6 +1042,7 @@ fn move_buses(
     mut lines: ResMut<Lines>,
     mut fleet: ResMut<Fleet>,
     mut staff: ResMut<Staff>,
+    ext: Res<extdepot::ExtDepots>,
     mut buses: Query<(Entity, &mut Bus, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
@@ -1168,8 +1184,14 @@ fn move_buses(
             );
             if matches!(bus.phase, Phase::Running | Phase::Approach | Phase::Wait) {
                 let pos = tf.translation.truncate();
-                let home = lines.0.get(bus.line).and_then(|l| l.home_leg.clone());
-                if !dispatch::start_return(&mut bus, pos, &map, &depot, home.as_ref()) {
+                let h = fleet.get(bus.fleet).map(|b| b.home).unwrap_or(0);
+                let site = ext.site(h, &depot);
+                let home = if h == 0 {
+                    lines.0.get(bus.line).and_then(|l| l.home_leg.clone())
+                } else {
+                    None
+                };
+                if !dispatch::start_return(&mut bus, pos, &map, &site, home.as_ref()) {
                     arrived_home = true;
                 }
             }

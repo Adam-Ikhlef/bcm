@@ -475,7 +475,7 @@ pub fn build_body(
         format!(
             "Pick something, then click anywhere on your lot. {} stands · {} buses.",
             fleet.stand_count(),
-            fleet.buses.len()
+            fleet.count_at(0)
         ),
     ));
     let items = [

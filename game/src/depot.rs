@@ -1321,7 +1321,10 @@ pub fn rebuild_panel(
     research: Res<crate::research::Research>,
     view: Res<View>,
     st: Res<crate::bus_menu::BuyState>,
-    market: Res<crate::bus_menu::Market>,
+    (market, ext): (
+        Res<crate::bus_menu::Market>,
+        Res<crate::extdepot::ExtDepots>,
+    ),
     mut thumbs: ResMut<crate::bus_menu::Thumbs>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -1455,7 +1458,7 @@ pub fn rebuild_panel(
             return;
         }
         if *panel != DepotPanel::Shop {
-            if fleet.stand_count() == 0 {
+            if fleet.stand_count() == 0 && ext.list.is_empty() {
                 p.spawn(text(
                     f,
                     false,
@@ -1475,6 +1478,7 @@ pub fn rebuild_panel(
             *st,
             tab.0,
             &market,
+            &ext,
             &mut thumbs,
             &mut images,
         );
@@ -1494,6 +1498,7 @@ pub fn depot_actions(
     mut tab: ResMut<ShopTab>,
     mut st: ResMut<crate::bus_menu::BuyState>,
     mut market: ResMut<crate::bus_menu::Market>,
+    ext: Res<crate::extdepot::ExtDepots>,
 ) {
     for UiAction(a) in events.read() {
         match *a {
@@ -1503,23 +1508,32 @@ pub fn depot_actions(
                 st.qty = (st.qty as i32 + d as i32).clamp(1, crate::bus_menu::MAX_QTY as i32) as u8
             }
             Action::PaintPick(i) => st.paint = i,
+            Action::BuyHome => st.home = (st.home + 1) % (ext.list.len() + 1),
             Action::PatternPick(i) => st.pattern = i,
             Action::BuyUsed(k) => {
                 let Some(u) = market.items.get(k).cloned() else {
                     continue;
                 };
                 let name = catalog.0[u.spec].name.clone();
-                if fleet.stand_count() == 0 {
+                let home = if st.home <= ext.list.len() {
+                    st.home
+                } else {
+                    0
+                };
+                if fleet.capacity(home) == 0 {
                     eco.say(&real, "Build a parking stand first (Build button)");
-                } else if fleet.buses.len() >= fleet.stand_count() {
-                    eco.say(&real, "No free stand: build another stand or sell a bus");
+                } else if fleet.free_at(home) == 0 {
+                    eco.say(
+                        &real,
+                        "No free stand there: build more stands or sell a bus",
+                    );
                 } else if eco.money < u.price {
                     eco.say(
                         &real,
                         format!("Not enough money: {name} costs {}", fmt_money(u.price)),
                     );
                 } else if let Some(id) =
-                    fleet.add_custom(u.spec, Some(u.paint), u.fuel, u.condition, u.clean)
+                    fleet.add_at(home, u.spec, Some(u.paint), u.fuel, u.condition, u.clean)
                 {
                     eco.money -= u.price;
                     selected.0 = Some(id);
@@ -1535,9 +1549,14 @@ pub fn depot_actions(
                     continue;
                 };
                 let n = st.qty as usize;
-                let free = fleet.stand_count().saturating_sub(fleet.buses.len());
+                let home = if st.home <= ext.list.len() {
+                    st.home
+                } else {
+                    0
+                };
+                let free = fleet.free_at(home);
                 let total = spec.price * n as f64;
-                if fleet.stand_count() == 0 {
+                if fleet.capacity(home) == 0 {
                     eco.say(&real, "Build a parking stand first (Build button)");
                 } else if free < n {
                     eco.say(
@@ -1557,7 +1576,7 @@ pub fn depot_actions(
                     let paint = st.paint_for(spec);
                     let mut last = None;
                     for _ in 0..n {
-                        last = fleet.add_custom(i, paint, 100.0, 100.0, 100.0);
+                        last = fleet.add_at(home, i, paint, 100.0, 100.0, 100.0);
                     }
                     eco.money -= total;
                     if last.is_some() {

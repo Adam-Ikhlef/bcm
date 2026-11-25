@@ -165,7 +165,10 @@ pub fn station_actions(
     }
 }
 
-fn cursor_world(window: &Window, cam: &(&Camera, &GlobalTransform, &Projection)) -> Option<Vec2> {
+pub fn cursor_world(
+    window: &Window,
+    cam: &(&Camera, &GlobalTransform, &Projection),
+) -> Option<Vec2> {
     let cursor = window.cursor_position()?;
     cam.0.viewport_to_world_2d(cam.1, cursor).ok()
 }

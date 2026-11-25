@@ -37,7 +37,7 @@ pub struct Tech {
 
 pub const CATEGORIES: [&str; 3] = ["Depot", "Operations", "Growth"];
 
-pub const TECHS: [Tech; 5] = [
+pub const TECHS: [Tech; 6] = [
     Tech {
         name: "Lot expansion I",
         blurb: "Lets you buy the next part of your lot",
@@ -77,6 +77,14 @@ pub const TECHS: [Tech; 5] = [
         days: 4.0,
         needs: None,
         cat: 2,
+    },
+    Tech {
+        name: "External depots",
+        blurb: "Build extra depots (indoor parking, up to 100 stands each) anywhere on your map",
+        cost: 12_000.0,
+        days: 6.0,
+        needs: Some(1),
+        cat: 0,
     },
 ];
 
@@ -498,22 +506,6 @@ fn plus_badge(cv: &mut Cv, x: f32, y: f32) {
     );
 }
 
-fn city_block(cv: &mut Cv, x: i32, y: i32) {
-    cv.rect(x - 14, y - 12, x + 14, y + 14, (0xe8, 0xee, 0xf6));
-    cv.rect(x - 14, y - 12, x + 14, y - 6, (0xe2, 0x47, 0x5c));
-    for wx in [-8, 2] {
-        for wy in [0, 7] {
-            cv.rect(
-                x + wx,
-                y + wy - 3,
-                x + wx + 6,
-                y + wy + 2,
-                (0x4a, 0x8f, 0xd8),
-            );
-        }
-    }
-}
-
 /// Draws the picture of one research.
 fn draw_tech(i: usize) -> Vec<u8> {
     let (top, bottom) = match TECHS[i].cat {
@@ -564,26 +556,15 @@ fn draw_tech(i: usize) -> Vec<u8> {
             );
         }
         _ => {
-            let road = (0x50, 0x56, 0x66);
-            if i == 5 {
-                cv.line((55.0, 40.0), (135.0, 40.0), 6.0, road);
-                for k in 0..6 {
-                    let x = 62 + k * 12;
-                    cv.rect(x, 39, x + 6, 41, (0xf2, 0xd2, 0x4a));
+            // a building with rolling doors and a bus in front
+            cv.rect(34, 24, 156, 66, (0xc9, 0xd3, 0xe0));
+            cv.tri((28.0, 26.0), (162.0, 26.0), (95.0, 6.0), (0x8a, 0x96, 0xa8));
+            for k in 0..3 {
+                let x = 44 + k * 38;
+                cv.rect(x, 38, x + 28, 66, (0x4a, 0x55, 0x66));
+                for l in 0..4 {
+                    cv.rect(x, 42 + l * 6, x + 28, 43 + l * 6, (0x6b, 0x78, 0x8c));
                 }
-                city_block(&mut cv, 50, 40);
-                city_block(&mut cv, 140, 40);
-            } else {
-                for (a, b) in [
-                    ((50.0, 52.0), (140.0, 52.0)),
-                    ((50.0, 52.0), (95.0, 22.0)),
-                    ((140.0, 52.0), (95.0, 22.0)),
-                ] {
-                    cv.line(a, b, 5.0, road);
-                }
-                city_block(&mut cv, 48, 52);
-                city_block(&mut cv, 142, 52);
-                city_block(&mut cv, 95, 24);
             }
         }
     }

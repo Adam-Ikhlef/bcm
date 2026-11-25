@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Size of the pin on screen (pixels).
-const PIN_PX: f32 = 40.0;
+pub const PIN_PX: f32 = 40.0;
 
 #[derive(Resource, Default)]
 pub struct Placing {

@@ -40,6 +40,8 @@ pub struct BuyState {
     /// 0 = factory colour, otherwise `PAINTS[paint - 1]`.
     pub paint: u8,
     pub pattern: u8,
+    /// Depot new buses go to: 0 = main depot, k = external depot k.
+    pub home: usize,
 }
 
 impl Default for BuyState {
@@ -49,6 +51,7 @@ impl Default for BuyState {
             qty: 1,
             paint: 0,
             pattern: 0,
+            home: 0,
         }
     }
 }
@@ -389,6 +392,7 @@ pub fn body(
     st: BuyState,
     cat: Category,
     market: &Market,
+    ext: &crate::extdepot::ExtDepots,
     thumbs: &mut Thumbs,
     images: &mut Assets<Image>,
 ) {
@@ -407,7 +411,28 @@ pub fn body(
             row.spawn(button(f, l, Action::BusTab(i as u8), kind));
         }
     });
-    let free = fleet.stand_count().saturating_sub(fleet.buses.len());
+    let home = if st.home <= ext.list.len() {
+        st.home
+    } else {
+        0
+    };
+    if st.tab != 0 && !ext.list.is_empty() {
+        p.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(text(f, false, 12.0, style::MUTED, "New buses park at"));
+            row.spawn(button(
+                f,
+                ext.depot_name(home),
+                Action::BuyHome,
+                BtnKind::Small,
+            ));
+        });
+    }
+    let free = fleet.free_at(home);
     p.spawn(crate::ui::scroll_box(10 + st.tab, Val::Vh(52.0), 6.0))
         .with_children(|p| match st.tab {
             0 => owned(p, f, fleet, catalog, thumbs, images),

@@ -444,6 +444,61 @@ pub fn short_name(p: &Place) -> &str {
     p.display_name.split(',').next().unwrap_or("").trim()
 }
 
+#[derive(Deserialize)]
+struct PlaceResponse {
+    elements: Vec<PlaceElement>,
+}
+
+#[derive(Deserialize)]
+struct PlaceElement {
+    lat: f64,
+    lon: f64,
+    tags: std::collections::HashMap<String, String>,
+}
+
+/// Name of the nearest city, town or village within 20 km of a point (used to name depots).
+pub fn nearest_place_name(lat: f64, lon: f64) -> Option<String> {
+    let query = format!(
+        "[out:json][timeout:25];node(around:20000,{lat:.5},{lon:.5})[\"place\"~\"^(city|town|village)$\"][\"name\"];out 40;"
+    );
+    for url in OVERPASS_SERVERS {
+        let Ok(resp) = agent()
+            .post(url)
+            .timeout(Duration::from_secs(30))
+            .send_form(&[("data", &query)])
+        else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_reader::<_, PlaceResponse>(resp.into_reader()) else {
+            continue;
+        };
+        return pick_nearest(&parsed.elements, lat, lon);
+    }
+    None
+}
+
+fn pick_nearest(list: &[PlaceElement], lat: f64, lon: f64) -> Option<String> {
+    let kx = lat.to_radians().cos();
+    list.iter()
+        .map(|e| {
+            let d = ((e.lat - lat).powi(2) + ((e.lon - lon) * kx).powi(2)).sqrt();
+            // a city counts as closer than a village at the same distance
+            let rank = match e.tags.get("place").map(String::as_str) {
+                Some("city") => 0.7,
+                Some("town") => 0.85,
+                _ => 1.0,
+            };
+            (d * rank, e)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .and_then(|(_, e)| {
+            e.tags
+                .get("name:en")
+                .or_else(|| e.tags.get("name"))
+                .cloned()
+        })
+}
+
 /// Downloads fresh OpenStreetMap data for an already downloaded city. The old data stays in place
 /// until the new download has been checked, so a failed update never breaks the city.
 pub fn refresh_city(place: &Place) -> Result<(), String> {
@@ -530,5 +585,31 @@ mod tests {
         assert!(q.contains("area(id:3600000007)"));
         assert!(q.contains("(.all;-.inh;)"));
         assert!(!q.contains("route"), "tiles skip bus route relations");
+    }
+
+    #[test]
+    fn depot_is_named_after_the_nearest_place() {
+        let el = |lat, lon, place: &str, name: &str| PlaceElement {
+            lat,
+            lon,
+            tags: [("place", place), ("name", name)]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let list = vec![
+            el(33.10, -7.00, "village", "Near Village"),
+            el(33.20, -7.00, "city", "Far City"),
+            el(33.12, -7.00, "town", "Mid Town"),
+        ];
+        assert_eq!(
+            pick_nearest(&list, 33.09, -7.0).as_deref(),
+            Some("Near Village")
+        );
+        assert_eq!(
+            pick_nearest(&list, 33.18, -7.0).as_deref(),
+            Some("Far City")
+        );
+        assert_eq!(pick_nearest(&[], 0.0, 0.0), None);
     }
 }

@@ -144,6 +144,9 @@ struct BusSave {
     /// Custom paint: (r, g, b, pattern).
     #[serde(default)]
     paint: Option<(u8, u8, u8, u8)>,
+    /// Depot the bus lives in (0 = main depot).
+    #[serde(default)]
+    home: usize,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -201,6 +204,8 @@ pub struct SaveData {
     /// Positions in `stations` of the ones that were demolished.
     #[serde(default)]
     stations_gone: Vec<usize>,
+    #[serde(default)]
+    ext_depots: Vec<crate::extdepot::ExtSave>,
     /// Research in progress: (tech, finishing game minute).
     #[serde(default)]
     research_active: Option<(usize, f64)>,
@@ -331,6 +336,7 @@ pub fn collect(world: &World) -> Option<SaveData> {
             .buses
             .iter()
             .map(|b| BusSave {
+                home: b.home,
                 plate: b.plate.clone(),
                 spec: catalog
                     .0
@@ -360,6 +366,10 @@ pub fn collect(world: &World) -> Option<SaveData> {
                     .map(|o| (o.pos.x, o.pos.y, o.name.clone()))
                     .collect()
             })
+            .unwrap_or_default(),
+        ext_depots: world
+            .get_resource::<crate::extdepot::ExtDepots>()
+            .map(crate::extdepot::collect)
             .unwrap_or_default(),
         stations_gone: world
             .get_resource::<crate::stations::Stations>()
@@ -482,9 +492,14 @@ pub fn apply_pending_load(world: &mut World) {
         fleet.placed = crate::fleet::migrate_old_layout(&[true; 16], &[]);
         fleet.lot_level = 2;
     }
+    let ext = crate::extdepot::restore(&map, &data.ext_depots);
+    fleet.ext_stands = ext.list.iter().map(|d| d.stands).collect();
     for b in &data.buses {
         let spec = catalog.0.iter().position(|s| s.name == b.spec).unwrap_or(0);
-        let Some(id) = fleet.add(spec) else { break };
+        let home = if b.home <= ext.list.len() { b.home } else { 0 };
+        let Some(id) = fleet.add_at(home, spec, None, 100.0, 100.0, 100.0) else {
+            continue;
+        };
         if let Some(fb) = fleet.get_mut(id) {
             fb.plate = b.plate.clone();
             fb.fuel = b.fuel;
@@ -505,6 +520,7 @@ pub fn apply_pending_load(world: &mut World) {
     staff.next_id = data.staff_next_id;
     staff.version += 1;
 
+    world.insert_resource(ext);
     world.insert_resource(map);
     world.insert_resource(catalog);
     world.insert_resource(lines);
