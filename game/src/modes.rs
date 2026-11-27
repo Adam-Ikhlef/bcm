@@ -108,6 +108,8 @@ pub struct Conditions {
     pub demand: f32,
     pub cost: f32,
     pub wear: f32,
+    /// Ticket income (ticket inspector contracts).
+    pub income: f32,
     pub event: Option<(Event, u64)>,
     last_day: u64,
 }
@@ -118,6 +120,7 @@ impl Default for Conditions {
             demand: 1.0,
             cost: 1.0,
             wear: 1.0,
+            income: 1.0,
             event: None,
             last_day: u64::MAX,
         }
@@ -125,7 +128,7 @@ impl Default for Conditions {
 }
 
 /// Cheap deterministic "random" number in 0..1 for a day.
-fn roll(day: u64) -> f32 {
+pub fn roll(day: u64) -> f32 {
     let x = day
         .wrapping_mul(0x9E37_79B9_7F4A_7C15)
         .rotate_left(17)
@@ -146,6 +149,7 @@ pub fn update_conditions(
     session: Res<Session>,
     mut cond: ResMut<Conditions>,
     reviews: Res<crate::reviews::Reviews>,
+    contracts: Res<crate::contracts::Contracts>,
     mut eco: ResMut<Economy>,
     real: Res<Time<Real>>,
 ) {
@@ -172,9 +176,11 @@ pub fn update_conditions(
     let (d, c, w) = cond
         .event
         .map_or((1.0, 1.0, 1.0), |(e, _)| (e.demand, e.cost, e.wear));
-    cond.demand = session.mode.demand_factor() * d * reviews.demand_mult();
-    cond.cost = session.mode.cost_factor() * c;
-    cond.wear = session.mode.wear_factor() * w;
+    cond.demand =
+        session.mode.demand_factor() * d * reviews.demand_mult() * contracts.demand_mult();
+    cond.cost = session.mode.cost_factor() * c * contracts.fuel_mult();
+    cond.wear = session.mode.wear_factor() * w * contracts.wear_mult();
+    cond.income = contracts.income_mult();
 }
 
 #[cfg(test)]

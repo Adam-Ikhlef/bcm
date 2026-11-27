@@ -2,6 +2,7 @@ mod bus_menu;
 mod busicon;
 mod busmodel;
 mod company;
+mod contracts;
 mod demand;
 mod depot;
 mod dispatch;
@@ -307,6 +308,9 @@ fn main() {
     .init_resource::<stopcard::StopCard>()
     .init_resource::<modes::Conditions>()
     .init_resource::<reviews::Reviews>()
+    .init_resource::<contracts::Contracts>()
+    .init_resource::<depot::Arrivals>()
+    .init_resource::<depot::Lags>()
     .init_resource::<bus_menu::Thumbs>()
     .init_resource::<sidebar::Missions>()
     .init_resource::<save::PendingLoad>()
@@ -442,6 +446,10 @@ fn main() {
         )
             .run_if(in_state(AppState::Playing)),
     )
+    .add_systems(
+        Update,
+        (contracts::contract_tick, contracts::contract_actions).run_if(in_state(AppState::Playing)),
+    )
     .add_systems(OnExit(AppState::Menu), depot::menu_backdrop_exit)
     .add_systems(
         OnExit(AppState::Playing),
@@ -478,6 +486,8 @@ fn main() {
                 depot::depot_pick,
                 depot::sync_depot_buses,
                 depot::animate_departures,
+                depot::sync_gates,
+                depot::animate_gates,
                 depot::sync_cards,
                 depot::update_cards,
                 depot::update_selection_marker,
@@ -566,6 +576,7 @@ fn init_game(
     commands.insert_resource(stopcard::StopCard::default());
     commands.insert_resource(modes::Conditions::default());
     commands.insert_resource(reviews::Reviews::default());
+    commands.insert_resource(contracts::Contracts::default());
     commands.insert_resource(extdepot::ExtDepots::default());
     commands.insert_resource(Draft::default());
     commands.insert_resource(Tool::Idle);
@@ -1101,6 +1112,7 @@ fn move_buses(
     for (entity, mut bus, mut tf) in &mut buses {
         let mut traveled = 0.0f32;
         let fare = lines.0.get(bus.line).map_or(finance::BASE_FARE, |l| l.fare)
+            * cond.income as f64
             * fleet.get(bus.fleet).map_or(1.0, |b| b.fare_mult());
         let mut earned = 0.0f64;
         let mut boarded_now = 0.0f32;

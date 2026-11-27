@@ -125,6 +125,7 @@ pub enum Tab {
     Overview,
     Loans,
     Tickets,
+    Contracts,
 }
 
 #[derive(Resource, Default)]
@@ -297,6 +298,7 @@ pub fn fin_actions(
                 fin.tab = match t {
                     1 => Tab::Loans,
                     2 => Tab::Tickets,
+                    3 => Tab::Contracts,
                     _ => Tab::Overview,
                 };
                 fin.version += 1;
@@ -371,6 +373,13 @@ pub fn fin_ui(
     real: Res<Time<Real>>,
     session: Res<Session>,
     cond: Res<crate::modes::Conditions>,
+    contracts: Res<crate::contracts::Contracts>,
+    (fleet, up, stations, ext): (
+        Res<crate::fleet::Fleet>,
+        Res<crate::stopup::StopUpgrades>,
+        Res<crate::stations::Stations>,
+        Res<crate::extdepot::ExtDepots>,
+    ),
     existing: Query<Entity, With<FinModal>>,
     mut last: Local<Option<(u32, u64, usize)>>,
 ) {
@@ -444,6 +453,7 @@ pub fn fin_ui(
                         (Tab::Overview, "Overview"),
                         (Tab::Loans, "Loans"),
                         (Tab::Tickets, "Ticket prices"),
+                        (Tab::Contracts, "Contracts"),
                     ]
                     .into_iter()
                     .enumerate()
@@ -462,12 +472,23 @@ pub fn fin_ui(
                         Tab::Overview => overview(body, f, &fin, &eco, &lines, &cond),
                         Tab::Loans => loans(body, f, &fin, &eco, session.mode),
                         Tab::Tickets => tickets(body, f, &lines),
+                        Tab::Contracts => {
+                            let overhead =
+                                stations.monthly_cost() + ext.monthly_cost() + up.monthly_cost();
+                            let ctx = crate::contracts::Ctx::new(
+                                &fin,
+                                fleet.buses.len(),
+                                up.levels.len(),
+                                overhead,
+                            );
+                            crate::contracts::tab(body, f, &contracts, &ctx)
+                        }
                     });
             });
         });
 }
 
-fn card() -> impl Bundle {
+pub fn card() -> impl Bundle {
     (
         Node {
             flex_direction: FlexDirection::Column,

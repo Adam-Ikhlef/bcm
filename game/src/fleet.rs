@@ -9,15 +9,15 @@ use crate::style;
 
 /// Size of one grid cell of the depot, in metres. A parking stand is 1 cell wide, 4 cells long.
 pub const CELL: f32 = 5.0;
-pub const GRID_COLS: i32 = 13;
-pub const GRID_ROWS: i32 = 10;
+pub const GRID_COLS: i32 = 26;
+pub const GRID_ROWS: i32 = 20;
 /// World position of the grid's top-left corner (x, z).
 pub const GRID_X0: f32 = -45.0;
 pub const GRID_Z0: f32 = -25.0;
 /// Columns you own at each lot level (all rows are owned; the left plot is owned from the start).
-pub const LOT_LEVEL_COLS: [i32; 3] = [9, 11, 13];
+pub const LOT_LEVEL_COLS: [i32; 3] = [18, 22, 26];
 /// Price to expand the lot from level 0 -> 1 and 1 -> 2.
-pub const LOT_EXPAND_COST: [f64; 2] = [6_000.0, 12_000.0];
+pub const LOT_EXPAND_COST: [f64; 2] = [10_000.0, 20_000.0];
 /// Price of one parking stand; removing it refunds half.
 pub const STAND_COST: f64 = 400.0;
 
@@ -545,6 +545,8 @@ pub struct FleetBus {
     pub depart: Option<Depart>,
     /// Bought upgrades (bit mask, see `UPGRADES`).
     pub upgrades: u8,
+    /// Just came home: the 3D depot shows it driving in (not saved).
+    pub arriving: bool,
 }
 
 /// Bus upgrades: (name, price, what it does).
@@ -808,6 +810,7 @@ impl Fleet {
             assigned: None,
             depart: None,
             upgrades: 0,
+            arriving: false,
         });
         self.version += 1;
         Some(id)
@@ -870,6 +873,7 @@ impl Fleet {
         if let Some(b) = self.get_mut(id) {
             b.line = None;
             b.bay = if b.home == 0 { free } else { None };
+            b.arriving = b.bay.is_some();
         }
         self.version += 1;
     }
@@ -894,6 +898,7 @@ mod tests {
             assigned: None,
             depart: None,
             upgrades: 0b111,
+            arriving: false,
         };
         f.buses.push(b);
         let b = &f.buses[0];
@@ -945,16 +950,16 @@ mod tests {
         assert!(f.place(Item::Stand, 5, 0));
         assert!(!f.place(Item::Stand, 5, 2), "overlaps the first stand");
         assert!(f.place(Item::Stand, 5, 4));
-        // Column 9 is locked at level 0.
-        assert!(f.can_place(Item::Stand, 9, 0).is_err());
+        // Column 18 is locked at level 0.
+        assert!(f.can_place(Item::Stand, 18, 0).is_err());
         f.lot_level = 1;
-        assert!(f.can_place(Item::Stand, 9, 0).is_ok());
+        assert!(f.can_place(Item::Stand, 18, 0).is_ok());
         // Rooms fit on the left plot, several of the same kind are allowed.
         assert!(f.place(Item::Room(Room::Workshop), 0, 0));
         assert!(f.place(Item::Room(Room::Workshop), 0, 3));
         assert_eq!(f.room_count(Room::Workshop), 2);
         assert!(
-            !f.place(Item::Room(Room::Workshop), 12, 0),
+            !f.place(Item::Room(Room::Workshop), 25, 0),
             "outside the lot"
         );
         // Stands with a bus cannot be removed.

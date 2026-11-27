@@ -14,7 +14,8 @@ use bevy::{
 use crate::{
     busmodel::{self, BusAssets},
     fleet::{
-        footprint_center, Catalog, Category, Cell, Fleet, Item, Room, CELL, GRID_ROWS, GRID_Z0,
+        footprint_center, Catalog, Category, Cell, Fleet, Item, Room, CELL, GRID_COLS, GRID_ROWS,
+        GRID_X0, GRID_Z0,
     },
     lot::{BuildTool, DepotPanel},
     style,
@@ -153,36 +154,80 @@ pub fn apply_view(
 
 // --- Scene layout ---------------------------------------------------------------
 
-const COLS: usize = 8;
 pub const BAY_W: f32 = 5.0;
 pub const BAY_L: f32 = 20.0;
-const LANE: f32 = 9.0;
 
-/// Path a departing bus drives inside the yard: out of its bay, along an apron, then east off the lot.
-pub fn exit_path(bay: Cell, fleet: &Fleet) -> Vec<Vec3> {
-    let p = bay_pos(bay);
+/// Centre of the lot (the scene is laid out around it).
+const LOT_CX: f32 = GRID_X0 + GRID_COLS as f32 * CELL / 2.0;
+const LOT_CZ: f32 = GRID_Z0 + GRID_ROWS as f32 * CELL / 2.0;
+const LOT_W: f32 = GRID_COLS as f32 * CELL + 10.0;
+const LOT_D: f32 = GRID_ROWS as f32 * CELL + 10.0;
+/// The side street east of the lot (runs along Z); buses leave north and come back from the north.
+const STREET_X: f32 = LOT_CX + LOT_W / 2.0 + 14.0;
+/// Where buses leave the scene.
+const FAR_Z: f32 = LOT_CZ - 170.0;
+
+fn lane_z(bay: Cell, fleet: &Fleet) -> f32 {
     // Drive forward (+z) to the first free row, then out along it.
     let mut row = bay.1 + Item::Stand.size().1;
     while row < GRID_ROWS && fleet.placed_at((bay.0, row)).is_some() {
         row += 1;
     }
-    let lane_z = if row >= GRID_ROWS {
+    if row >= GRID_ROWS {
         GRID_Z0 + GRID_ROWS as f32 * CELL + 2.5
     } else {
         GRID_Z0 + (row as f32 + 0.5) * CELL
-    };
+    }
+}
+
+/// Path of a departing bus: out of its bay, along a lane, east to the side street, then north
+/// (right-hand traffic) until it leaves the scene.
+pub fn exit_path(bay: Cell, fleet: &Fleet) -> Vec<Vec3> {
+    let p = bay_pos(bay);
+    let z = lane_z(bay, fleet);
     vec![
         p,
-        Vec3::new(p.x, 0.0, lane_z),
-        Vec3::new(COLS as f32 * BAY_W / 2.0 + 29.0, 0.0, lane_z),
+        Vec3::new(p.x, 0.0, z),
+        Vec3::new(STREET_X + 2.2, 0.0, z),
+        Vec3::new(STREET_X + 2.2, 0.0, FAR_Z),
     ]
 }
 
+/// Path of a bus coming home: down the side street, along the lane, then reversing into its bay.
+pub fn enter_path(bay: Cell, fleet: &Fleet) -> Vec<Vec3> {
+    let p = bay_pos(bay);
+    let z = lane_z(bay, fleet);
+    vec![
+        Vec3::new(STREET_X - 2.2, 0.0, FAR_Z),
+        Vec3::new(STREET_X - 2.2, 0.0, z),
+        Vec3::new(p.x, 0.0, z),
+        p,
+    ]
+}
+
+fn path_length(path: &[Vec3]) -> f32 {
+    path.windows(2).map(|w| w[0].distance(w[1])).sum()
+}
+
 pub fn exit_length(bay: Cell, fleet: &Fleet) -> f32 {
-    exit_path(bay, fleet)
-        .windows(2)
-        .map(|w| w[0].distance(w[1]))
-        .sum()
+    path_length(&exit_path(bay, fleet))
+}
+
+/// Position and heading after driving `dist` metres along `path`.
+fn follow(path: &[Vec3], mut dist: f32) -> (Vec3, Vec3) {
+    let mut heading = Vec3::Z;
+    let mut pos = path[0];
+    for w in path.windows(2) {
+        let seg = w[1] - w[0];
+        let len = seg.length();
+        heading = seg / len.max(1e-3);
+        if dist <= len {
+            return (w[0] + heading * dist, heading);
+        }
+        dist -= len;
+        pos = w[1];
+    }
+    (pos, heading)
 }
 
 pub fn bay_pos(bay: Cell) -> Vec3 {
@@ -208,8 +253,8 @@ pub struct DepotView {
 impl Default for DepotView {
     fn default() -> Self {
         Self {
-            target: Vec3::new(-8.0, 0.0, -6.0),
-            height: 66.0,
+            target: Vec3::new(LOT_CX + 4.0, 0.0, LOT_CZ - 6.0),
+            height: 120.0,
         }
     }
 }
@@ -257,15 +302,16 @@ pub fn spawn_depot_scene(
     let gate = materials.add(solid(style::rgb(0x3a, 0x40, 0x48), 0.6));
     let glass = materials.add(solid(style::rgb(0x9f, 0xc4, 0xd8), 0.2));
 
-    let lot_w = COLS as f32 * BAY_W + 10.0;
-    let lot_d = 2.0 * BAY_L + LANE + 8.0;
+    let lot_w = LOT_W;
+    let lot_d = LOT_D;
+    let off = Vec3::new(LOT_CX, 0.0, LOT_CZ);
 
     let mut place =
         |mesh: &Handle<Mesh>, mat: &Handle<StandardMaterial>, pos: Vec3, scale: Vec3| {
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat.clone()),
-                Transform::from_translation(pos).with_scale(scale),
+                Transform::from_translation(pos + off).with_scale(scale),
                 GameWorld,
             ));
         };
@@ -275,7 +321,7 @@ pub fn spawn_depot_scene(
         &cube,
         &grass,
         Vec3::new(0.0, -0.3, 0.0),
-        Vec3::new(260.0, 0.4, 260.0),
+        Vec3::new(700.0, 0.4, 700.0),
     );
     place(
         &cube,
@@ -285,9 +331,20 @@ pub fn spawn_depot_scene(
     );
     // Curbs
     for (x, z, sx, sz) in [
-        (0.0, lot_d / 2.0, lot_w + 0.6, 0.5),
+        // front curb with a gap for the driveway
+        (
+            -(lot_w / 2.0 + 7.0) / 2.0 - 3.5,
+            lot_d / 2.0,
+            lot_w / 2.0 - 7.0 + 0.3,
+            0.5,
+        ),
+        (
+            (lot_w / 2.0 + 7.0) / 2.0 + 3.5,
+            lot_d / 2.0,
+            lot_w / 2.0 - 7.0 + 0.3,
+            0.5,
+        ),
         (0.0, -lot_d / 2.0, lot_w + 0.6, 0.5),
-        (lot_w / 2.0, 0.0, 0.5, lot_d),
         (-lot_w / 2.0, 0.0, 0.5, lot_d),
     ] {
         place(&cube, &curb, Vec3::new(x, 0.08, z), Vec3::new(sx, 0.3, sz));
@@ -307,8 +364,8 @@ pub fn spawn_depot_scene(
         Vec3::new(0.0, 8.25, bz),
         Vec3::new(lot_w + 1.2, 0.5, 15.2),
     );
-    for i in 0..4 {
-        let x = (i as f32 - 1.5) * (lot_w / 4.2);
+    for i in 0..8 {
+        let x = (i as f32 - 3.5) * (lot_w / 8.4);
         place(
             &cube,
             &gate,
@@ -344,23 +401,18 @@ pub fn spawn_depot_scene(
             Vec3::new(1.7 * s, 3.4 * s, 1.7 * s),
         );
     };
-    let ex = lot_w / 2.0 + 6.0;
-    for (i, z) in [-26.0, -13.0, 0.0, 13.0, 26.0, 38.0].iter().enumerate() {
-        let s = 0.9 + (i % 3) as f32 * 0.15;
-        tree(ex, *z, s);
-        tree(-ex - 18.0, *z + 4.0, 1.0 + (i % 2) as f32 * 0.2);
+    let ex = lot_w / 2.0 + 5.0;
+    for i in 0..11 {
+        let z = -lot_d / 2.0 + 6.0 + i as f32 * 10.5;
+        tree(-ex, z, 0.9 + (i % 3) as f32 * 0.15);
+        tree(-ex - 16.0, z + 4.0, 1.0 + (i % 2) as f32 * 0.2);
     }
-    for (x, z) in [
-        (ex - 3.0, -8.0),
-        (ex - 3.5, 9.0),
-        (-ex + 3.0, 18.0),
-        (-ex + 3.2, -18.0),
-        (12.0, lot_d / 2.0 + 3.5),
-    ] {
+    for i in 0..8 {
+        let x = -lot_w / 2.0 + 14.0 + i as f32 * 17.0;
         place(
             &ball,
             &bush,
-            Vec3::new(x, 0.55, z),
+            Vec3::new(x, 0.55, lot_d / 2.0 + 3.5),
             Vec3::new(1.6, 1.1, 1.6),
         );
     }
@@ -368,7 +420,7 @@ pub fn spawn_depot_scene(
     // --- Surroundings: main street, side street, intersection, sidewalks, buildings, lamps ---
     let street_w = 11.0;
     let zs = lot_d / 2.0 + 14.0; // main street (runs along X) in front of the depot
-    let xs = lot_w / 2.0 + 26.0; // side street (runs along Z) to the right of the depot
+    let xs = lot_w / 2.0 + 14.0; // side street (runs along Z) to the right of the depot
     let sw = 3.0; // sidewalk width
     let paving = materials.add(solid(style::rgb(0xb4, 0xb2, 0xa8), 0.9));
     let road = materials.add(solid(style::rgb(0x55, 0x58, 0x5e), 0.92));
@@ -401,7 +453,7 @@ pub fn spawn_depot_scene(
         materials.add(solid(style::rgb(0x8a, 0x4b, 0x3c), 0.8)),
         materials.add(solid(style::rgb(0x5b, 0x60, 0x68), 0.8)),
     ];
-    let reach = 125.0;
+    let reach = 190.0;
 
     // Sidewalks first (slightly higher), then asphalt on top where roads cross them.
     place(
@@ -435,17 +487,6 @@ pub fn spawn_depot_scene(
         Vec3::new(0.0, 0.06, (lot_d / 2.0 + zs - street_w / 2.0) / 2.0),
         Vec3::new(14.0, 0.16, zs - street_w / 2.0 - lot_d / 2.0 + 0.2),
     );
-    // Yard exits to the side street (buses leave along the middle lane and the front apron)
-    for z in [0.0, lot_d / 2.0 - 2.0] {
-        let x0 = lot_w / 2.0 - 1.0;
-        let x1 = xs - street_w / 2.0 + 0.5;
-        place(
-            &cube,
-            &road,
-            Vec3::new((x0 + x1) / 2.0, 0.065, z),
-            Vec3::new(x1 - x0, 0.16, 8.0),
-        );
-    }
     // Lane markings (dashed), skipped inside the intersection
     let mut x = -reach + 3.0;
     while x < reach - 3.0 {
@@ -560,28 +601,75 @@ pub fn spawn_depot_scene(
     }
 
     // Buildings: (center x, center z, width, depth, floors, wall, facing +z(+1)/-z(-1))
-    #[rustfmt::skip]
-    let blocks: [(f32, f32, f32, f32, u32, usize, f32); 16] = [
-        // south of the main street (face the street = -z side)
-        (-70.0, zs + 28.0, 16.0, 14.0, 4, 0, -1.0),
-        (-50.0, zs + 27.0, 14.0, 13.0, 5, 1, -1.0),
-        (-30.0, zs + 28.0, 18.0, 14.0, 3, 2, -1.0),
-        (-8.0,  zs + 27.0, 14.0, 13.0, 6, 3, -1.0),
-        (14.0,  zs + 28.0, 16.0, 14.0, 4, 4, -1.0),
-        (34.0,  zs + 27.0, 12.0, 13.0, 5, 0, -1.0),
-        (xs + 26.0, zs + 28.0, 18.0, 14.0, 4, 2, -1.0),
-        (xs + 48.0, zs + 27.0, 16.0, 14.0, 7, 1, -1.0),
-        // east of the side street
-        (xs + 24.0, 10.0, 14.0, 20.0, 3, 4, 1.0),
-        (xs + 24.0, -18.0, 14.0, 22.0, 5, 3, 1.0),
-        (xs + 46.0, 10.0, 16.0, 18.0, 4, 0, 1.0),
-        (xs + 46.0, -18.0, 16.0, 20.0, 3, 2, 1.0),
-        // north-west corner behind the garage
-        (-48.0, -56.0, 20.0, 16.0, 4, 1, 1.0),
-        (-22.0, -60.0, 16.0, 14.0, 3, 4, 1.0),
-        (xs - 30.0, -52.0, 18.0, 14.0, 5, 3, 1.0),
-        (-80.0, -20.0, 14.0, 20.0, 4, 0, 1.0),
-    ];
+    let mut blocks: Vec<(f32, f32, f32, f32, u32, usize, f32)> = Vec::new();
+    let pick = |i: usize, m: usize| (i * 7 + i / 3 * 5 + 2) % m;
+    // south of the main street (face the street)
+    let mut x = -reach + 12.0;
+    let mut i = 0;
+    while x < reach - 12.0 {
+        let w = 12.0 + (pick(i, 4) * 2) as f32;
+        if (x - xs).abs() > w / 2.0 + street_w / 2.0 + sw + 2.0 {
+            blocks.push((
+                x,
+                zs + 27.0 + (i % 2) as f32,
+                w,
+                13.0 + (i % 2) as f32,
+                3 + pick(i, 5) as u32,
+                pick(i, 5),
+                -1.0,
+            ));
+        }
+        x += 22.0;
+        i += 1;
+    }
+    // east of the side street
+    let mut z = -reach + 16.0;
+    while z < zs - street_w / 2.0 - 16.0 {
+        for (k, dx) in [24.0, 46.0].iter().enumerate() {
+            let d = 16.0 + pick(i + k, 3) as f32 * 3.0;
+            blocks.push((
+                xs + dx,
+                z,
+                14.0 + k as f32 * 2.0,
+                d,
+                3 + pick(i + k, 4) as u32,
+                pick(i + k, 5),
+                1.0,
+            ));
+        }
+        z += 26.0;
+        i += 1;
+    }
+    // behind the garage
+    let mut x = -reach + 20.0;
+    while x < xs - 20.0 {
+        blocks.push((
+            x,
+            -(lot_d / 2.0 + 44.0),
+            18.0,
+            15.0,
+            3 + pick(i, 4) as u32,
+            pick(i, 5),
+            1.0,
+        ));
+        x += 30.0;
+        i += 1;
+    }
+    // west of the lot
+    let mut z = -lot_d / 2.0 + 10.0;
+    while z < zs - 30.0 {
+        blocks.push((
+            -lot_w / 2.0 - 46.0,
+            z,
+            14.0,
+            20.0,
+            3 + pick(i, 4) as u32,
+            pick(i, 5),
+            1.0,
+        ));
+        z += 30.0;
+        i += 1;
+    }
     for (i, (bx, bz2, w, dp, floors, wall, face)) in blocks.iter().enumerate() {
         let h = *floors as f32 * 3.2;
         place(
@@ -620,7 +708,10 @@ pub fn spawn_depot_scene(
         );
     }
     // Trees on the sidewalks
-    for tx in [-60.0, -38.0, -16.0, 20.0, 44.0] {
+    for tx in (0..14)
+        .map(|k| -150.0 + k as f32 * 23.0)
+        .filter(|t| (t - xs).abs() > 14.0)
+    {
         let (tz, s) = (zs + street_w / 2.0 + 1.6, 0.7);
         place(
             &trunk,
@@ -822,7 +913,7 @@ pub fn depot_camera(
 
     for ev in wheel.read() {
         if !block.0 {
-            view.height = (view.height * (1.0 - ev.y.clamp(-3.0, 3.0) * 0.1)).clamp(16.0, 110.0);
+            view.height = (view.height * (1.0 - ev.y.clamp(-3.0, 3.0) * 0.1)).clamp(16.0, 240.0);
         }
     }
     let per_px = view.height / window.height();
@@ -850,8 +941,8 @@ pub fn depot_camera(
         let step = dir.normalize() * 30.0 * (view.height / 60.0) * time.delta_secs();
         view.target += step;
     }
-    view.target.x = view.target.x.clamp(-70.0, 70.0);
-    view.target.z = view.target.z.clamp(-70.0, 70.0);
+    view.target.x = view.target.x.clamp(LOT_CX - 110.0, LOT_CX + 140.0);
+    view.target.z = view.target.z.clamp(LOT_CZ - 110.0, LOT_CZ + 100.0);
 
     let (mut tf, mut proj) = cam.into_inner();
     tf.rotation = rot;
@@ -868,7 +959,7 @@ pub fn depot_camera(
 /// Parked (idle) buses are shown in the depot; buses on a line are not.
 pub fn sync_depot_buses(
     mut commands: Commands,
-    fleet: Res<Fleet>,
+    mut fleet: ResMut<Fleet>,
     catalog: Res<Catalog>,
     assets: Res<BusAssets>,
     asset_server: Res<AssetServer>,
@@ -876,6 +967,7 @@ pub fn sync_depot_buses(
     existing: Query<(Entity, &DepotBus)>,
     mut selected: ResMut<Selected>,
     mut last: Local<Option<u32>>,
+    mut arrivals: ResMut<Arrivals>,
 ) {
     if *last == Some(fleet.version) {
         return;
@@ -894,11 +986,19 @@ pub fn sync_depot_buses(
             commands.entity(e).despawn();
         }
     }
+    let arriving_ids: Vec<u32> = fleet
+        .buses
+        .iter()
+        .filter(|b| b.arriving)
+        .map(|b| b.id)
+        .collect();
     for (id, bay) in wanted {
         if existing.iter().any(|(_, d)| d.0 == id) {
             continue;
         }
-        let Some(fb) = fleet.get(id) else { continue };
+        let Some(fb) = fleet.get(id) else {
+            continue;
+        };
         let spec = &catalog.0[fb.spec];
         let e = busmodel::spawn_bus_visual(
             &mut commands,
@@ -913,6 +1013,28 @@ pub fn sync_depot_buses(
             Transform::from_translation(bay_pos(bay)),
         );
         commands.entity(e).insert((DepotBus(id), GameWorld));
+        if arriving_ids.contains(&id) {
+            arrivals.0.insert(id, 0.0);
+            commands
+                .entity(e)
+                .insert(Transform::from_translation(Vec3::new(
+                    STREET_X - 2.2,
+                    0.0,
+                    FAR_Z,
+                )));
+        }
+    }
+    // The flag is consumed here without making the fleet look changed.
+    let arriving: Vec<u32> = fleet
+        .buses
+        .iter()
+        .filter(|b| b.arriving)
+        .map(|b| b.id)
+        .collect();
+    for id in arriving {
+        if let Some(b) = fleet.bypass_change_detection().get_mut(id) {
+            b.arriving = false;
+        }
     }
     if let Some(id) = selected.0 {
         if fleet.get(id).is_none_or(|b| b.line.is_some()) {
@@ -1696,35 +1818,219 @@ pub fn depot_actions(
     }
 }
 
-/// Drives departing buses out of their bays in the 3D depot.
-pub fn animate_departures(fleet: Res<Fleet>, mut q: Query<(&DepotBus, &mut Transform)>) {
-    for (d, mut tf) in &mut q {
-        let Some(b) = fleet.get(d.0) else { continue };
-        let (Some(bay), Some(dep)) = (b.bay, b.depart) else {
-            continue;
-        };
-        let path = exit_path(bay, &fleet);
-        let mut dist = dep.elapsed * crate::dispatch::EXIT_SPEED;
-        let mut heading = Vec3::Z;
-        let mut pos = path[0];
-        for w in path.windows(2) {
-            let seg = w[1] - w[0];
-            let len = seg.length();
-            heading = seg / len.max(1e-3);
-            if dist <= len {
-                pos = w[0] + heading * dist;
-                dist = -1.0;
-                break;
-            }
-            dist -= len;
-            pos = w[1];
-        }
-        let _ = dist;
-        let yaw = heading.x.atan2(heading.z);
-        let target = Quat::from_rotation_y(yaw);
-        tf.translation = pos;
-        tf.rotation = tf.rotation.slerp(target, 0.12);
+/// A barrier on a lane where buses leave the yard.
+#[derive(Component)]
+pub struct GateArm(Vec3);
+
+#[derive(Component)]
+pub struct GateVisual;
+
+const GATE_X: f32 = LOT_CX + LOT_W / 2.0;
+
+/// Builds a road and an automatic barrier on every lane that buses use to leave the yard.
+pub fn sync_gates(
+    mut commands: Commands,
+    fleet: Res<Fleet>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    existing: Query<Entity, With<GateVisual>>,
+    mut last: Local<Option<u32>>,
+) {
+    if *last == Some(fleet.version) && !existing.is_empty() {
+        return;
     }
+    *last = Some(fleet.version);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    let mut lanes: Vec<f32> = Vec::new();
+    for p in &fleet.placed {
+        if p.item == Item::Stand {
+            let z = lane_z((p.c, p.r), &fleet);
+            if !lanes.iter().any(|l| (l - z).abs() < 0.01) {
+                lanes.push(z);
+            }
+        }
+    }
+    let cube = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    let road = materials.add(solid(style::rgb(0x55, 0x58, 0x5e), 0.92));
+    let post = materials.add(solid(style::rgb(0x3a, 0x40, 0x48), 0.6));
+    let arm = materials.add(solid(style::rgb(0xd8, 0x32, 0x2c), 0.6));
+    let stripe = materials.add(solid(style::rgb(0xf4, 0xf4, 0xf0), 0.6));
+    let x0 = GATE_X - 1.0;
+    let x1 = STREET_X - 5.0;
+    for z in lanes {
+        let mut put = |m: &Handle<StandardMaterial>, pos: Vec3, scale: Vec3| {
+            commands.spawn((
+                Mesh3d(cube.clone()),
+                MeshMaterial3d(m.clone()),
+                Transform::from_translation(pos).with_scale(scale),
+                GateVisual,
+                GameWorld,
+            ));
+        };
+        put(
+            &road,
+            Vec3::new((x0 + x1) / 2.0, 0.065, z),
+            Vec3::new(x1 - x0, 0.16, 8.0),
+        );
+        let pivot = Vec3::new(GATE_X + 2.0, 1.3, z + 4.2);
+        put(
+            &post,
+            Vec3::new(pivot.x, 0.85, pivot.z),
+            Vec3::new(0.6, 1.7, 0.6),
+        );
+        commands
+            .spawn((
+                GateArm(pivot),
+                Transform::from_translation(pivot),
+                Visibility::default(),
+                GateVisual,
+                GameWorld,
+            ))
+            .with_children(|c| {
+                c.spawn((
+                    Mesh3d(cube.clone()),
+                    MeshMaterial3d(arm.clone()),
+                    Transform::from_xyz(0.0, 0.0, -3.9).with_scale(Vec3::new(0.2, 0.22, 7.8)),
+                ));
+                for k in 0..3 {
+                    c.spawn((
+                        Mesh3d(cube.clone()),
+                        MeshMaterial3d(stripe.clone()),
+                        Transform::from_xyz(0.0, 0.0, -1.5 - k as f32 * 2.4)
+                            .with_scale(Vec3::new(0.24, 0.24, 0.9)),
+                    ));
+                }
+            });
+    }
+}
+
+/// Lifts a barrier while a bus is driving through it.
+pub fn animate_gates(
+    time: Res<Time>,
+    buses: Query<(&DepotBus, &Transform), Without<GateArm>>,
+    fleet: Res<Fleet>,
+    arrivals: Res<Arrivals>,
+    mut arms: Query<(&GateArm, &mut Transform), Without<DepotBus>>,
+) {
+    let moving: Vec<Vec3> = buses
+        .iter()
+        .filter(|(d, _)| {
+            arrivals.0.contains_key(&d.0) || fleet.get(d.0).is_some_and(|b| b.depart.is_some())
+        })
+        .map(|(_, t)| t.translation)
+        .collect();
+    for (g, mut tf) in &mut arms {
+        let near = moving
+            .iter()
+            .any(|p| (p.x - g.0.x).abs() < 14.0 && (p.z - (g.0.z - 4.2)).abs() < 14.0);
+        let target = if near { 1.45 } else { 0.0 };
+        let cur = tf.rotation.to_euler(EulerRot::XYZ).0;
+        let next = cur + (target - cur).clamp(-3.0, 3.0) * (time.delta_secs() * 3.0).min(1.0);
+        tf.rotation = Quat::from_rotation_x(next);
+    }
+}
+
+/// Buses that are driving home in the 3D depot: id -> seconds since they entered the scene.
+#[derive(Resource, Default)]
+pub struct Arrivals(pub std::collections::HashMap<u32, f32>);
+
+/// Distance a bus holds back while it waits behind another one (per bus id).
+#[derive(Resource, Default)]
+pub struct Lags(std::collections::HashMap<u32, f32>);
+
+/// Distance behind a bus in front at which a bus waits.
+const FOLLOW_GAP: f32 = 9.0;
+
+/// Drives buses along the depot's roads: departing buses go out of their bay and leave the scene,
+/// returning buses come in from the street and reverse into their bay. A bus waits behind a slower
+/// bus in front of it instead of driving through it.
+pub fn animate_departures(
+    time: Res<Time>,
+    fleet: Res<Fleet>,
+    mut arrivals: ResMut<Arrivals>,
+    mut lags: ResMut<Lags>,
+    mut q: Query<(&DepotBus, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    let speed = crate::dispatch::EXIT_SPEED;
+    struct M {
+        id: u32,
+        pos: Vec3,
+        heading: Vec3,
+        reversing: bool,
+        done: bool,
+    }
+    let mut movers: Vec<M> = Vec::new();
+    for (d, _) in &q {
+        let Some(b) = fleet.get(d.0) else { continue };
+        let Some(bay) = b.bay else { continue };
+        let lag = lags.0.get(&d.0).copied().unwrap_or(0.0);
+        if let Some(dep) = b.depart {
+            let path = exit_path(bay, &fleet);
+            let (pos, heading) = follow(&path, (dep.elapsed * speed - lag).max(0.0));
+            movers.push(M {
+                id: d.0,
+                pos,
+                heading,
+                reversing: false,
+                done: false,
+            });
+        } else if let Some(t) = arrivals.0.get_mut(&d.0) {
+            *t += dt;
+            let path = enter_path(bay, &fleet);
+            let len = path_length(&path);
+            let dist = (*t * speed - lag).max(0.0);
+            let (pos, heading) = follow(&path, dist.min(len));
+            let last_leg = len - dist < path[2].distance(path[3]);
+            movers.push(M {
+                id: d.0,
+                pos,
+                heading,
+                reversing: last_leg,
+                done: dist >= len,
+            });
+        }
+    }
+    // Who has to wait: another bus ahead, on the same road, driving the same way.
+    let blocked: Vec<bool> = movers
+        .iter()
+        .map(|a| {
+            movers.iter().any(|b| {
+                if a.id == b.id || a.reversing || b.reversing {
+                    return false;
+                }
+                let d = b.pos - a.pos;
+                let ahead = d.dot(a.heading);
+                let side = (d - a.heading * ahead).length();
+                ahead > 0.0 && ahead < FOLLOW_GAP && side < 3.0 && a.heading.dot(b.heading) > 0.3
+            })
+        })
+        .collect();
+    for (m, wait) in movers.iter().zip(blocked) {
+        let lag = lags.0.entry(m.id).or_insert(0.0);
+        if wait {
+            *lag += speed * dt;
+        } else {
+            *lag = (*lag - 0.5 * speed * dt).max(0.0);
+        }
+    }
+    for m in &movers {
+        if let Some((_, mut tf)) = q.iter_mut().find(|(d, _)| d.0 == m.id) {
+            let h = if m.reversing { -m.heading } else { m.heading };
+            tf.translation = m.pos;
+            tf.rotation = tf
+                .rotation
+                .slerp(Quat::from_rotation_y(h.x.atan2(h.z)), 0.12);
+            if m.done {
+                arrivals.0.remove(&m.id);
+                lags.0.remove(&m.id);
+                tf.rotation = Quat::from_rotation_y(0.0);
+            }
+        }
+    }
+    lags.0.retain(|id, _| movers.iter().any(|m| m.id == *id));
 }
 
 // --- Main-menu backdrop -------------------------------------------------------------------
@@ -1813,14 +2119,29 @@ mod tests {
         let p = exit_path((5, 0), &f);
         // Rows 0-3 and 4-7 are stands: the first free row is 8.
         assert!((p[1].z - (GRID_Z0 + 8.5 * CELL)).abs() < 1e-3);
-        assert!(p[2].x > p[1].x);
+        assert!(p[2].x > p[1].x && p[3].z < p[2].z);
         let q = exit_path((5, 4), &f);
         assert!((q[1].z - (GRID_Z0 + 8.5 * CELL)).abs() < 1e-3);
         // The lone stand at the end leaves the grid.
         let mut g = Fleet::default();
-        assert!(g.place(Item::Stand, 5, 6));
-        let r = exit_path((5, 6), &g);
+        assert!(g.place(Item::Stand, 5, 16));
+        let r = exit_path((5, 16), &g);
         assert!(r[1].z > GRID_Z0 + GRID_ROWS as f32 * CELL);
+    }
+
+    #[test]
+    fn buses_come_home_the_way_they_left() {
+        let mut f = Fleet::default();
+        assert!(f.place(Item::Stand, 5, 0));
+        let out = exit_path((5, 0), &f);
+        let back = enter_path((5, 0), &f);
+        assert_eq!(back.last(), out.first());
+        assert!(path_length(&back) > 100.0);
+        // Last leg of the way home runs into the bay (reversing), ending exactly on it.
+        let (pos, _) = follow(&back, path_length(&back));
+        assert!(pos.distance(bay_pos((5, 0))) < 1e-3);
+        let (mid, h) = follow(&out, 4.0);
+        assert!(mid.distance(out[0]) > 3.9 && h.z > 0.9);
     }
 }
 

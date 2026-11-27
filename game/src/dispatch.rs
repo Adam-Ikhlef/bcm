@@ -15,9 +15,9 @@ use crate::{
 };
 
 /// Speed of a bus driving out of the depot yard (m/s, depot animation).
-pub const EXIT_SPEED: f32 = 7.0;
+pub const EXIT_SPEED: f32 = 12.0;
 /// Rough length of the depot exit animation in seconds, used to plan departure lead time.
-const EXIT_SECONDS: f32 = 16.0;
+const EXIT_SECONDS: f32 = 30.0;
 /// A layover bus is handed to a departure this many minutes before it is due.
 const CLAIM_MIN: f64 = 3.0;
 /// Buses with no departure within this many minutes go back to the depot.

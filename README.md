@@ -219,7 +219,7 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Bus equipment upgrades (IBIS, ticket and card validator, announcements, info display, USB, Wi-Fi...); new buses come with them unless unchecked
 - [ ] Bus maintenance (tires, wipers, battery, engine, lights, equipment)
 - [ ] Ticket inspectors (appear in buses on the map)
-- [ ] Bigger 3D depot (4x) with buses driving paths in and out of the depot scene
+- [x] Bigger 3D depot (4x lot, 26x20 cells): buses leave along roads to the edge of the scene and come back in, reversing into their bay; buses wait behind each other. Existing stands keep their place (lot expansion now 18 / 22 / 26 columns)
 - [ ] Working destination displays on 3D depot buses
 - [ ] Timetable menu (shifts per depot and bus, driver per bus, bus groups per line)
-- [ ] Contracts: ours (ads, Wi-Fi, electricity, fuel, parts, inspectors) and offers from other companies with negotiation
+- [x] Contracts (Finance menu): suppliers for fuel, electricity, parts, Wi-Fi, ticket inspectors; advertisers come to us; negotiation via the researchers ($300, 2 days)

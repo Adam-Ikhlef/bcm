@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bus Manager: run a bus company on real maps</title>
-<meta name="description" content="Bus Manager is a free bus company management game on real OpenStreetMap cities, built with Rust and Bevy for Windows, macOS and Linux.">
+<meta name="description" content="Bus Manager is a free bus company management game on real OpenStreetMap cities: lines, depots, finance, contracts and reviews. Built with Rust and Bevy for Windows, macOS and Linux.">
 <meta property="og:title" content="Bus Manager">
 <meta property="og:description" content="Run a bus company on the real map of your own city.">
 <link rel="canonical" href="https://busmanager.yoz-team.online/">
@@ -107,7 +107,12 @@ footer a{color:inherit}
     <div class="card"><div class="ico" style="background:var(--orange)">D</div><h3>Build your depot</h3><p>Start with an empty lot. Place parking stands, expand the land and build a workshop, wash bay, fuel station and break room.</p></div>
     <div class="card"><div class="ico" style="background:#8e24aa">P</div><h3>Passengers with destinations</h3><p>Riders pick where they want to go. Busy, nearby stops attract more of them and they only board buses that take them there.</p></div>
     <div class="card"><div class="ico" style="background:#00897b">S</div><h3>Drivers and shifts</h3><p>Hire drivers for early, late and night shifts, set timetables and keep your fleet serviced and fuelled.</p></div>
-    <div class="card"><div class="ico" style="background:#d81b60">3D</div><h3>Four bus categories</h3><p>Minibuses, solo buses, double-deckers and articulated buses, each with their own models. Players can add their own buses.</p></div>
+    <div class="card"><div class="ico" style="background:#d81b60">3D</div><h3>Four bus categories</h3><p>Minibuses, solo buses, double-deckers and articulated buses, each with their own models. Upgrade engines, parts and seats, or add your own buses.</p></div>
+    <div class="card"><div class="ico" style="background:#3949ab">$</div><h3>Finance</h3><p>Profit graphs per hour, day and line, bank loans and a ticket price for every line. Charge more and fewer people ride.</p></div>
+    <div class="card"><div class="ico" style="background:#6d4c41">C</div><h3>Contracts</h3><p>Sign suppliers for fuel, electricity, parts, Wi-Fi and ticket inspectors, or answer advertisers who want your buses. Send the researchers to negotiate better terms.</p></div>
+    <div class="card"><div class="ico" style="background:#f9a825">&#9733;</div><h3>Reviews and reputation</h3><p>Passengers write reviews about crowding, clean buses and prices. Your star rating moves how many people ride.</p></div>
+    <div class="card"><div class="ico" style="background:#43a047">H</div><h3>Your own stops</h3><p>Build stations while drawing a line and upgrade them with shelters, benches and live displays. Click any stop to see who waits for which line.</p></div>
+    <div class="card"><div class="ico" style="background:#546e7a">T</div><h3>Grow beyond one city</h3><p>Research new 10 km map tiles in four directions and open external depots. Pick Casual, Realistic (with events) or Sandbox.</p></div>
   </div>
 </div></section>
 
@@ -115,6 +120,7 @@ footer a{color:inherit}
   <h2>Screenshots</h2>
   <p class="sub">Work in progress builds from the game.</p>
   <div class="shots">
+    <div class="shot"><img src="img/depot.jpg" alt="The large 3D depot yard" loading="lazy"><div><h3>A depot four times bigger</h3><p>A wide yard with room for dozens of stands and rooms. Buses drive out along the street and come back in and reverse into their bay.</p></div></div>
     <div class="shot"><img src="img/map.jpg" alt="Buses running a line on the city map" loading="lazy"><div><h3>The city map</h3><p>A clean OSM-style map with German H bus stops, a minimap, missions and live line statistics.</p></div></div>
     <div class="shot"><img src="img/plan.jpg" alt="Route planning screen" loading="lazy"><div><h3>Route planning</h3><p>Pick stops in order, drop waypoints on roads and see the length and loop time before you open the line.</p></div></div>
     <div class="shot"><img src="img/build.jpg" alt="Depot build panel" loading="lazy"><div><h3>Build your depot</h3><p>Buy and place parking stands, expand the lot step by step and add rooms that make running costs cheaper.</p></div></div>
@@ -137,13 +143,19 @@ footer a{color:inherit}
   <h2>Roadmap</h2>
   <p class="sub">What is done and what is coming.</p>
   <ul class="road">
-    <li class="done"><i class="dot">✓</i><div><b>Real maps, depot, 3D buses, planner, timetables</b><br><span>Done</span></div></li>
-    <li class="done"><i class="dot">✓</i><div><b>Company, game modes, save and load, updates</b><br><span>Casual, Realistic and Sandbox modes; in-game updater; Discord Rich Presence</span></div></li>
-    <li class="done"><i class="dot">✓</i><div><b>Depot v2 and passenger destinations</b><br><span>Build stands and rooms, riders with destinations</span></div></li>
-    <li><i class="dot"></i><div><b>Choose your depot location</b><br><span>Pick where your company starts on the map</span></div></li>
-    <li><i class="dot"></i><div><b>Researches</b><br><span>Unlock depot expansion and open new 10 km map tiles around your city, in four directions</span></div></li>
-    <li><i class="dot"></i><div><b>Own bus stations and waypoints</b><br><span>Build your own stops with a monthly cost instead of using the map's</span></div></li>
-    <li><i class="dot"></i><div><b>Better graphics</b><br><span>Lighting, materials, models and buildings</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Real maps, depot, 3D buses, planner, timetables</b><br><span>Downloaded from OpenStreetMap inside the game</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Company, game modes, save and load, updates</b><br><span>Casual, Realistic and Sandbox; in-game updater; Discord Rich Presence</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Researches, map tiles and external depots</b><br><span>Lot expansion, four-direction 10 km tiles, depots inside buildings</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Real demand and your own stops</b><br><span>Hospitals, schools and malls weigh more than sheds; build, upgrade and demolish stations</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Finance, bus upgrades and reviews</b><br><span>Profit graphs, loans, ticket prices, customer reviews and reputation</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Contracts</b><br><span>Suppliers, advertisers and negotiation</span></div></li>
+    <li class="done"><i class="dot">✓</i><div><b>Bigger 3D depot</b><br><span>A yard four times larger with buses driving in and out on roads</span></div></li>
+    <li><i class="dot"></i><div><b>Social media feed</b><br><span>Posts using your company name and logo</span></div></li>
+    <li><i class="dot"></i><div><b>Fully customizable 3D bus paint</b><br><span>Paint areas and import textures</span></div></li>
+    <li><i class="dot"></i><div><b>Bus equipment, maintenance and ticket inspectors</b><br><span>IBIS, validators, Wi-Fi, tires, wipers, batteries and inspectors on board</span></div></li>
+    <li><i class="dot"></i><div><b>Depot destination displays</b><br><span>Working destination signs on the buses in the depot</span></div></li>
+    <li><i class="dot"></i><div><b>Timetable menu</b><br><span>Shifts per depot and bus, driver per bus, bus groups per line</span></div></li>
+    <li><i class="dot"></i><div><b>Signed installers</b><br><span>Windows code signing and macOS notarisation</span></div></li>
   </ul>
 </div></section>
 
