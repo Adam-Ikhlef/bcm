@@ -1818,6 +1818,65 @@ pub fn depot_actions(
     }
 }
 
+/// What the destination display of a depot bus shows.
+fn sign_text(
+    b: &crate::fleet::FleetBus,
+    lines: &crate::Lines,
+    map: &crate::osm::MapData,
+) -> String {
+    let li = b.depart.map(|d| d.line).or(b.assigned);
+    let Some(li) = li else {
+        return "NO SERVICE".to_string();
+    };
+    let Some(line) = lines.0.get(li) else {
+        return "NO SERVICE".to_string();
+    };
+    let dest = line
+        .route
+        .stop_at
+        .iter()
+        .rev()
+        .find_map(|s| *s)
+        .and_then(|i| map.stops.get(i))
+        .map(|s| s.name.as_str())
+        .unwrap_or("");
+    let num = format!("{} ", li + 1);
+    format!("{num}{}", crate::ledsign::clean(dest))
+}
+
+/// Keeps every depot bus's display on the right line and destination.
+#[allow(clippy::too_many_arguments)]
+pub fn update_signs(
+    fleet: Res<Fleet>,
+    lines: Res<crate::Lines>,
+    map: Res<crate::osm::MapData>,
+    mut cache: ResMut<crate::ledsign::SignCache>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    buses: Query<(&DepotBus, &Children)>,
+    mut signs: Query<&mut MeshMaterial3d<StandardMaterial>, With<crate::ledsign::DestSign>>,
+    mut shown: Local<std::collections::HashMap<u32, String>>,
+) {
+    for (d, children) in &buses {
+        let Some(b) = fleet.get(d.0) else { continue };
+        let text = sign_text(b, &lines, &map);
+        if shown.get(&d.0) == Some(&text) {
+            continue;
+        }
+        let mat = cache.material(&text, &mut images, &mut materials);
+        let mut found = false;
+        for c in children.iter() {
+            if let Ok(mut m) = signs.get_mut(c) {
+                m.0 = mat.clone();
+                found = true;
+            }
+        }
+        if found {
+            shown.insert(d.0, text);
+        }
+    }
+}
+
 /// A barrier on a lane where buses leave the yard.
 #[derive(Component)]
 pub struct GateArm(Vec3);

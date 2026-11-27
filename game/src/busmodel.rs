@@ -22,6 +22,7 @@ pub struct BusAssets {
     white: Handle<StandardMaterial>,
     door: Handle<StandardMaterial>,
     amber: Handle<StandardMaterial>,
+    quad: Handle<Mesh>,
     headlight: Handle<StandardMaterial>,
     taillight: Handle<StandardMaterial>,
 }
@@ -40,6 +41,9 @@ pub fn install_bus_assets(world: &mut World) {
     let cube = world
         .resource_mut::<Assets<Mesh>>()
         .add(Cuboid::new(1.0, 1.0, 1.0));
+    let quad = world
+        .resource_mut::<Assets<Mesh>>()
+        .add(Rectangle::new(1.0, 1.0));
     let wheel = world
         .resource_mut::<Assets<Mesh>>()
         .add(Cylinder::new(0.5, 1.0));
@@ -52,6 +56,7 @@ pub fn install_bus_assets(world: &mut World) {
     };
     let assets = BusAssets {
         cube,
+        quad,
         wheel,
         glass: m.add(StandardMaterial {
             base_color: Color::srgb(0.10, 0.14, 0.19),
@@ -190,13 +195,18 @@ fn segment(
             Vec3::new(0.0, 0.42, zf + 0.06),
             Vec3::new(w + 0.04, 0.34, 0.14),
         );
-        part(
-            p,
-            &a.cube,
-            &a.amber,
-            Vec3::new(0.0, h - 0.62, zf + 0.04),
-            Vec3::new(w * 0.6, 0.2, 0.05),
-        );
+        // Dot-matrix destination display (its text is set by the depot, see `ledsign`)
+        let sw = w * 0.62;
+        p.spawn((
+            Mesh3d(a.quad.clone()),
+            MeshMaterial3d(a.amber.clone()),
+            Transform::from_xyz(0.0, h - 0.62, zf + 0.075).with_scale(Vec3::new(
+                sw,
+                sw / (crate::ledsign::COLS as f32 / crate::ledsign::ROWS as f32),
+                1.0,
+            )),
+            crate::ledsign::DestSign,
+        ));
         for x in [-1.0, 1.0] {
             part(
                 p,

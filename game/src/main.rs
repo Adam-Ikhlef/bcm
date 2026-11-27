@@ -9,6 +9,7 @@ mod dispatch;
 mod extdepot;
 mod finance;
 mod fleet;
+mod ledsign;
 mod lot;
 mod menu;
 mod modes;
@@ -309,6 +310,7 @@ fn main() {
     .init_resource::<modes::Conditions>()
     .init_resource::<reviews::Reviews>()
     .init_resource::<contracts::Contracts>()
+    .init_resource::<ledsign::SignCache>()
     .init_resource::<depot::Arrivals>()
     .init_resource::<depot::Lags>()
     .init_resource::<bus_menu::Thumbs>()
@@ -488,6 +490,7 @@ fn main() {
                 depot::animate_departures,
                 depot::sync_gates,
                 depot::animate_gates,
+                depot::update_signs,
                 depot::sync_cards,
                 depot::update_cards,
                 depot::update_selection_marker,
