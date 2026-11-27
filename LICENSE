@@ -661,15 +661,15 @@ For more information on this, and how to apply and follow the GNU AGPL, see
 <https://www.gnu.org/licenses/>.
 
 ------------------------------------------------------------------------
-Bus Company Manager licensing notice (not part of the GNU AGPL license text above)
+Bus Manager licensing notice (not part of the GNU AGPL license text above)
 
-Bus Company Manager is distributed under the GNU Affero General Public License,
+Bus Manager is distributed under the GNU Affero General Public License,
 version 3 only (SPDX-License-Identifier: AGPL-3.0-only), except for files
 that carry their own license notices.
 
-The Bus Company Manager name and original project logos are marks of YOZ Team,
+The Bus Manager name and original project logos are marks of YOZ Team,
 who created the original project codebase. The official organization is
-yoz-team.online: https://github.com/Adam-Ikhlef.
+yoz-team.online: https://github.com/YOZTeam.
 The source-code license does not grant permission to use these marks to
 imply official status, sponsorship or endorsement. See TRADEMARKS.md:
 https://github.com/YOZTeam/BusManager/blob/main/TRADEMARKS.md
