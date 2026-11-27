@@ -200,14 +200,26 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 
 ### Still to do
 
-- [ ] Real demand from buildings / POIs (needs the tile data to carry building types)
-- [ ] Bus stop shelters and other stop upgrades; stop icons / passenger badge polish
-- [ ] Per-line profit graphs, bus upgrades, loans
-- [ ] Casual / Realistic / Sandbox differences beyond wages (difficulty, events)
-- [ ] Customer reviews, social media and contracts using the company name and logo
+- [x] Real demand from building types and points of interest (hospitals, schools, malls, flats weigh more than sheds; applies to new stations too). Cities downloaded before this update get POI nodes after "Update data"
+- [x] Stop upgrades (Upgrade tool, U): shelter, benches and lighting, live info display. More riders, bigger platforms, monthly upkeep
+- [x] Stop card (click a stop: level, waiting riders per line, upgrade, demolish), stations list icon on the big map, Depots button in the bottom bar, stations built while drawing a line (B)
+- [x] Passenger badge polish: colour shows how full the platform is (yellow, orange, red)
+- [x] Finance menu (click the money balance): profit graphs per hour/day and per line, bank loans, ticket price per line (prices change how many people ride)
+- [x] Bus upgrades (select a bus in the depot): engine tune, reinforced parts, comfort seats + A/C
+- [x] Casual / Realistic / Sandbox differences: costs, wear, riders, loan terms, random events in Realistic
+- [x] Customer reviews and reputation (click the company name): stars move the riders
+- [ ] Social media feed and contracts using the company name and logo
 - [ ] Tiles: fill the grid between the four directions, tile preview before researching
 - [ ] External depots: dedicated 3D indoor view, per-depot staff
 - [ ] Missions panel state is not saved yet
 - [ ] Refund when demolishing an own station (idea)
 - [ ] Real-GPU checks on Windows / macOS (graphics API fallback, night look, shadows), full play-session balance of pace and passenger rate
 - [ ] Signed installers (Windows code signing, macOS notarisation)
+- [ ] Fully customizable 3D bus paint (paint areas, external textures)
+- [ ] Bus equipment upgrades (IBIS, ticket and card validator, announcements, info display, USB, Wi-Fi...); new buses come with them unless unchecked
+- [ ] Bus maintenance (tires, wipers, battery, engine, lights, equipment)
+- [ ] Ticket inspectors (appear in buses on the map)
+- [ ] Bigger 3D depot (4x) with buses driving paths in and out of the depot scene
+- [ ] Working destination displays on 3D depot buses
+- [ ] Timetable menu (shifts per depot and bus, driver per bus, bus groups per line)
+- [ ] Contracts: ours (ads, Wi-Fi, electricity, fuel, parts, inspectors) and offers from other companies with negotiation

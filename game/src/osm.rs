@@ -1,6 +1,12 @@
 //! Turns OpenStreetMap data (Overpass JSON or .osm.pbf) into a drivable road graph + bus stops.
 
-use std::{collections::HashMap, error::Error, fs::File, io::Read, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fs::File,
+    io::Read,
+    path::Path,
+};
 
 use bevy::prelude::*;
 use osmpbfreader::{OsmObj, OsmPbfReader};
@@ -86,6 +92,72 @@ pub enum AreaKind {
 pub struct Area {
     pub kind: AreaKind,
     pub pts: Vec<Vec2>,
+    /// How many passengers this building draws (see `place_weight`); 0 for water and parks.
+    pub weight: f32,
+}
+
+/// A point of interest (school, hospital, shop…) that draws passengers.
+#[derive(Clone, Copy, Debug)]
+pub struct Poi {
+    pub pos: Vec2,
+    pub weight: f32,
+}
+
+/// Passenger weight of a place from its OpenStreetMap tags: a hospital or a mall draws far
+/// more riders than a garage. 1.0 is an ordinary house; the result is 0.05 .. 8.0.
+pub fn place_weight<'a>(get: impl Fn(&str) -> Option<&'a str>) -> f32 {
+    let building = match get("building") {
+        Some("apartments" | "residential" | "dormitory" | "block") => 2.5,
+        Some("house" | "detached" | "terrace" | "semidetached_house" | "bungalow") => 1.0,
+        Some("hotel") => 3.0,
+        Some("commercial" | "retail" | "office") => 3.0,
+        Some("supermarket" | "mall") => 5.0,
+        Some("school" | "kindergarten") => 4.0,
+        Some("university" | "college") => 6.0,
+        Some("hospital") => 6.0,
+        Some("train_station" | "transportation") => 6.0,
+        Some("civic" | "public" | "government" | "stadium" | "sports_hall") => 3.0,
+        Some("church" | "mosque" | "cathedral" | "temple" | "synagogue" | "chapel") => 1.5,
+        Some("industrial" | "warehouse" | "factory") => 1.2,
+        Some(
+            "garage" | "garages" | "shed" | "roof" | "hut" | "cabin" | "ruins" | "service"
+            | "greenhouse" | "carport" | "barn" | "farm_auxiliary" | "construction" | "container"
+            | "kiosk" | "toilets" | "static_caravan",
+        ) => 0.1,
+        Some(_) => 1.0,
+        None => 0.0,
+    };
+    let amenity = match get("amenity") {
+        Some("hospital") => 6.0,
+        Some("university" | "college") => 6.0,
+        Some("school") => 4.0,
+        Some("marketplace" | "townhall" | "courthouse" | "theatre" | "cinema") => 4.0,
+        Some("bus_station" | "ferry_terminal") => 5.0,
+        Some("clinic" | "library" | "community_centre" | "police" | "post_office") => 2.5,
+        Some("bank" | "pharmacy" | "restaurant" | "fast_food" | "cafe" | "doctors") => 1.5,
+        Some("place_of_worship") => 1.5,
+        _ => 0.0,
+    };
+    let shop = match get("shop") {
+        Some("mall" | "department_store") => 6.0,
+        Some("supermarket") => 3.5,
+        Some(_) => 1.2,
+        None => 0.0,
+    };
+    let other = if get("office").is_some() {
+        2.5
+    } else if matches!(
+        get("tourism"),
+        Some("hotel" | "attraction" | "museum" | "zoo")
+    ) {
+        3.0
+    } else {
+        0.0
+    };
+    let w: f32 = [building, amenity, shop, other]
+        .into_iter()
+        .fold(0.0, f32::max);
+    w.clamp(0.0, 8.0)
 }
 
 /// Classify a way as a map area from its tags (`get` looks a tag up by key).
@@ -136,6 +208,8 @@ pub struct MapData {
     /// Road polylines for drawing.
     pub roads: Vec<Road>,
     pub areas: Vec<Area>,
+    /// Points of interest (schools, hospitals, shops…) that add to the demand around them.
+    pub pois: Vec<Poi>,
     pub stops: Vec<Stop>,
     /// Real bus routes from OpenStreetMap route relations (stops resolved to `stops` indices).
     pub routes: Vec<BusRoute>,
@@ -289,6 +363,13 @@ impl MapData {
             self.areas.push(Area {
                 kind: a.kind,
                 pts: a.pts.into_iter().map(&shift).collect(),
+                weight: a.weight,
+            });
+        }
+        for p in other.pois {
+            self.pois.push(Poi {
+                pos: shift(p.pos),
+                weight: p.weight,
             });
         }
         for s in other.stops {
@@ -398,7 +479,8 @@ impl MapData {
 }
 
 type RawWay = (Vec<i64>, bool, RoadClass); // (node ids, oneway, class)
-type RawArea = (Vec<i64>, AreaKind);
+type RawArea = (Vec<i64>, AreaKind, f32); // (node ids, kind, passenger weight)
+type RawPoi = (i64, f64, f64, f32);
 
 /// Load a local .osm.pbf extract.
 pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
@@ -408,12 +490,17 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
     let mut raw_routes: Vec<RawRoute> = Vec::new();
     let mut ways: Vec<RawWay> = Vec::new();
     let mut areas: Vec<RawArea> = Vec::new();
+    let mut pois: Vec<RawPoi> = Vec::new();
 
     for obj in reader.iter() {
         match obj? {
             OsmObj::Node(n) => {
                 let (lat, lon) = (n.lat(), n.lon());
                 nodes.insert(n.id.0, (lat, lon));
+                let w = place_weight(|k| n.tags.get(k).map(|v| v.as_str()));
+                if w > 0.0 {
+                    pois.push((n.id.0, lat, lon, w));
+                }
                 if n.tags.contains("highway", "bus_stop") {
                     let name = n
                         .tags
@@ -434,7 +521,8 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
                         || w.tags.contains("junction", "roundabout");
                     ways.push((ids, oneway, class));
                 } else if let Some(kind) = area_kind(|k| w.tags.get(k).map(|v| v.as_str())) {
-                    areas.push((ids, kind));
+                    let weight = place_weight(|k| w.tags.get(k).map(|v| v.as_str()));
+                    areas.push((ids, kind, weight));
                 }
             }
             OsmObj::Relation(r) => {
@@ -481,7 +569,7 @@ pub fn load_pbf(path: &Path) -> Result<MapData, Box<dyn Error>> {
             }
         }
     }
-    build(&nodes, raw_stops, raw_routes, &ways, &areas)
+    build(&nodes, raw_stops, raw_routes, &ways, &areas, &pois)
 }
 
 #[derive(Deserialize)]
@@ -531,7 +619,47 @@ fn parse_interval(v: &str) -> Option<u32> {
 
 /// Load an Overpass API JSON response (as downloaded in-game).
 pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
-    load_overpass_in(reader, None)
+    load_overpass_in(reader, None, None)
+}
+
+/// Where the first node of every road, area and stop of a map is (about 1 m precision). A tile
+/// skips what is already on the map, so the part of a tile that overlaps a loaded city is not
+/// drawn and driven twice.
+pub struct Existing(HashSet<(i64, i64)>);
+
+impl Existing {
+    fn key(lat: f64, lon: f64) -> (i64, i64) {
+        ((lat * 1e5).round() as i64, (lon * 1e5).round() as i64)
+    }
+
+    pub fn from_map(map: &MapData) -> Self {
+        let kx = 111_320.0 * map.origin.0.to_radians().cos();
+        let key = |p: Vec2| {
+            Self::key(
+                map.origin.0 + p.y as f64 / 110_540.0,
+                map.origin.1 + p.x as f64 / kx,
+            )
+        };
+        let mut set = HashSet::new();
+        set.extend(
+            map.roads
+                .iter()
+                .filter_map(|r| r.pts.first().map(|p| key(*p))),
+        );
+        set.extend(
+            map.areas
+                .iter()
+                .filter_map(|a| a.pts.first().map(|p| key(*p))),
+        );
+        set.extend(map.stops.iter().map(|s| key(s.pos)));
+        set.extend(map.pois.iter().map(|p| key(p.pos)));
+        Self(set)
+    }
+
+    pub fn contains(&self, lat: f64, lon: f64) -> bool {
+        let (a, b) = Self::key(lat, lon);
+        (-1..=1).any(|da| (-1..=1).any(|db| self.0.contains(&(a + da, b + db))))
+    }
 }
 
 /// Like `load_overpass`, but for a map tile: `bounds` is (south, west, north, east). A road or
@@ -540,6 +668,7 @@ pub fn load_overpass(reader: impl Read) -> Result<MapData, Box<dyn Error>> {
 pub fn load_overpass_in(
     reader: impl Read,
     bounds: Option<[f64; 4]>,
+    existing: Option<&Existing>,
 ) -> Result<MapData, Box<dyn Error>> {
     let resp: OverpassResponse = serde_json::from_reader(reader)?;
     let mut nodes: HashMap<i64, (f64, f64)> = HashMap::new();
@@ -547,6 +676,7 @@ pub fn load_overpass_in(
     let mut raw_routes: Vec<RawRoute> = Vec::new();
     let mut ways: Vec<RawWay> = Vec::new();
     let mut areas: Vec<RawArea> = Vec::new();
+    let mut pois: Vec<RawPoi> = Vec::new();
 
     for el in resp.elements {
         match el.kind.as_str() {
@@ -554,6 +684,10 @@ pub fn load_overpass_in(
                 if let (Some(lat), Some(lon)) = (el.lat, el.lon) {
                     nodes.insert(el.id, (lat, lon));
                     if let Some(tags) = &el.tags {
+                        let w = place_weight(|k| tags.get(k).map(String::as_str));
+                        if w > 0.0 {
+                            pois.push((el.id, lat, lon, w));
+                        }
                         let is_stop = tags.get("highway").map(String::as_str) == Some("bus_stop")
                             || (tags.get("public_transport").map(String::as_str)
                                 == Some("platform")
@@ -575,7 +709,8 @@ pub fn load_overpass_in(
                             || tags.get("junction").map(String::as_str) == Some("roundabout");
                         ways.push((ids, oneway, class));
                     } else if let Some(kind) = area_kind(|k| tags.get(k).map(String::as_str)) {
-                        areas.push((ids, kind));
+                        let weight = place_weight(|k| tags.get(k).map(String::as_str));
+                        areas.push((ids, kind, weight));
                     }
                 }
             }
@@ -627,12 +762,20 @@ pub fn load_overpass_in(
                 .get(id)
                 .is_some_and(|&(lat, lon)| lat >= s && lat < n && lon >= w && lon < e)
         };
-        ways.retain(|(ids, _, _)| ids.first().is_some_and(inside));
-        areas.retain(|(ids, _)| ids.first().is_some_and(inside));
-        raw_stops.retain(|(id, ..)| inside(id));
+        let fresh = |id: &i64| {
+            existing.is_none_or(|ex| {
+                nodes
+                    .get(id)
+                    .is_none_or(|&(lat, lon)| !ex.contains(lat, lon))
+            })
+        };
+        ways.retain(|(ids, _, _)| ids.first().is_some_and(|i| inside(i) && fresh(i)));
+        areas.retain(|(ids, ..)| ids.first().is_some_and(|i| inside(i) && fresh(i)));
+        pois.retain(|(id, ..)| inside(id) && fresh(id));
+        raw_stops.retain(|(id, ..)| inside(id) && fresh(id));
         raw_routes.clear();
     }
-    build(&nodes, raw_stops, raw_routes, &ways, &areas)
+    build(&nodes, raw_stops, raw_routes, &ways, &areas, &pois)
 }
 
 fn cell_of(p: Vec2) -> (i32, i32) {
@@ -645,6 +788,7 @@ fn build(
     raw_routes: Vec<RawRoute>,
     ways: &[RawWay],
     raw_areas: &[RawArea],
+    raw_pois: &[RawPoi],
 ) -> Result<MapData, Box<dyn Error>> {
     if ways.is_empty() {
         return Err("no drivable roads found in this data".into());
@@ -704,8 +848,8 @@ fn build(
 
     // Filled areas: only closed ways with every node present.
     let mut areas: Vec<Area> = Vec::with_capacity(raw_areas.len());
-    let mut building_cells: HashMap<(i32, i32), u32> = HashMap::new();
-    for (ids, kind) in raw_areas {
+    let mut building_cells: HashMap<(i32, i32), f32> = HashMap::new();
+    for (ids, kind, weight) in raw_areas {
         if ids.len() < 4 || ids.first() != ids.last() {
             continue;
         }
@@ -716,9 +860,20 @@ fn build(
         let Some(pts) = pts else { continue };
         if *kind == AreaKind::Building {
             let c = pts.iter().copied().sum::<Vec2>() / pts.len() as f32;
-            *building_cells.entry(cell_of(c)).or_default() += 1;
+            *building_cells.entry(cell_of(c)).or_default() += *weight;
         }
-        areas.push(Area { kind: *kind, pts });
+        areas.push(Area {
+            kind: *kind,
+            pts,
+            weight: *weight,
+        });
+    }
+    // Points of interest add to the cell they stand in (a hospital node, a shop…).
+    let mut pois: Vec<Poi> = Vec::new();
+    for &(_, lat, lon, w) in raw_pois {
+        let pos = project(lat, lon);
+        *building_cells.entry(cell_of(pos)).or_default() += w;
+        pois.push(Poi { pos, weight: w });
     }
 
     // Spatial grid of road nodes: used for stop snapping and the density/demand proxy.
@@ -736,13 +891,13 @@ fn build(
 
         let mut best: Option<(NodeIndex, Vec2)> = None;
         let mut density = 0usize;
-        let mut buildings = 0u32;
+        let mut buildings = 0.0f32;
         for dx in -1..=1 {
             for dy in -1..=1 {
                 buildings += building_cells
                     .get(&(cx + dx, cy + dy))
                     .copied()
-                    .unwrap_or(0);
+                    .unwrap_or(0.0);
                 if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
                     density += cell.len();
                     for &(i, p) in cell {
@@ -761,7 +916,7 @@ fn build(
                 let demand = if building_cells.is_empty() {
                     (density as f32 / 400.0).clamp(0.3, 3.0)
                 } else {
-                    (buildings as f32 / 400.0).clamp(0.3, 3.0)
+                    (buildings / 400.0).clamp(0.3, 3.0)
                 };
                 stop_by_osm.insert(osm_id, stops.len());
                 stops.push(Stop {
@@ -805,6 +960,7 @@ fn build(
         graph,
         roads,
         areas,
+        pois,
         stops,
         routes,
         origin: (lat0, lon0),
@@ -814,6 +970,48 @@ fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hospitals_draw_more_riders_than_sheds() {
+        let w = |tags: &[(&str, &str)]| {
+            place_weight(|k| tags.iter().find(|(a, _)| *a == k).map(|(_, v)| *v))
+        };
+        assert!(w(&[("building", "hospital")]) > 4.0 * w(&[("building", "house")]));
+        assert!(w(&[("building", "shed")]) < 0.2);
+        assert!(w(&[("building", "yes"), ("shop", "mall")]) >= 6.0);
+        assert!(w(&[("building", "apartments")]) > w(&[("building", "house")]));
+        assert_eq!(w(&[("highway", "bus_stop")]), 0.0);
+    }
+
+    #[test]
+    fn busy_places_raise_stop_demand() {
+        // 100 small buildings next to one stop, all with the same tags
+        let city = |tags: &str| {
+            let mut els = String::from(
+                r#"{"type":"node","id":1,"lat":33.0,"lon":-7.0},
+                {"type":"node","id":2,"lat":33.0,"lon":-6.999},
+                {"type":"way","id":10,"nodes":[1,2],"tags":{"highway":"residential"}},
+                {"type":"node","id":20,"lat":33.0,"lon":-7.0,"tags":{"highway":"bus_stop"}}"#,
+            );
+            for i in 0..100 {
+                let (a, b, c) = (1000 + i * 3, 1001 + i * 3, 1002 + i * 3);
+                let lat = 33.0002 + i as f64 * 0.000005;
+                els.push_str(&format!(
+                    r#",{{"type":"node","id":{a},"lat":{lat},"lon":-7.0}},
+                    {{"type":"node","id":{b},"lat":{lat},"lon":-6.99995}},
+                    {{"type":"node","id":{c},"lat":{},"lon":-6.99995}},
+                    {{"type":"way","id":{},"nodes":[{a},{b},{c},{a}],"tags":{tags}}}"#,
+                    lat + 0.000003,
+                    5000 + i
+                ));
+            }
+            let json = format!(r#"{{"elements":[{els}]}}"#);
+            load_overpass(json.as_bytes()).unwrap().stops[0].demand
+        };
+        let sheds = city(r#"{"building":"shed"}"#);
+        let malls = city(r#"{"building":"yes","shop":"mall"}"#);
+        assert!(malls > 2.0 * sheds, "{malls} vs {sheds}");
+    }
 
     #[test]
     fn interval_tag_formats() {

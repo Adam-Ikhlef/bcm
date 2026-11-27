@@ -68,6 +68,7 @@ pub enum Action {
     ShopTab(crate::fleet::Category),
     Service(u32),
     Sell(u32),
+    BusUpgrade(u32, u8),
     Pause,
     Speed(u8),
     Menu,
@@ -100,8 +101,22 @@ pub enum Action {
     StartDir(u8),
     RetryTiles,
     ToggleStation,
-    ToggleDemolish,
+    ToggleStations,
+    ToggleCompany,
+    StopsFilter(u8),
+    StopsPage(i8),
+    StopSelect(usize),
+    CloseStop,
+    StopUpgrade(usize),
+    StopDemolish(usize),
     ToggleExtPanel,
+    ToggleFinance,
+    FinTab(u8),
+    FinRange,
+    TakeLoan(u8),
+    RepayLoan(u8),
+    Fare(u8, i8),
+    FareAll(i8),
     ToggleExtPlace,
     ExtStands(u8),
     ExtRename(u8),
@@ -408,6 +423,8 @@ pub struct NavIcons {
     pub build: Handle<Image>,
     pub staff: Handle<Image>,
     pub lines: Handle<Image>,
+    pub stops: Handle<Image>,
+    pub depots: Handle<Image>,
     pub menu: Handle<Image>,
     pub check: Handle<Image>,
     pub cross: Handle<Image>,
@@ -441,6 +458,8 @@ pub fn install_nav_icons(world: &mut World) {
         build: load(include_bytes!("../assets/icons/build.png")),
         staff: load(include_bytes!("../assets/icons/staff.png")),
         lines: load(include_bytes!("../assets/icons/lines.png")),
+        stops: load(include_bytes!("../assets/icons/stops.png")),
+        depots: load(include_bytes!("../assets/icons/depots.png")),
         menu: load(include_bytes!("../assets/icons/menu.png")),
         check: load(include_bytes!("../assets/icons/check.png")),
         cross: load(include_bytes!("../assets/icons/cross.png")),
@@ -609,6 +628,8 @@ pub fn spawn_game_ui(
             BorderRadius::all(Val::Px(14.0)),
             children![
                 (
+                    Button,
+                    Action::ToggleFinance,
                     Node {
                         justify_content: JustifyContent::Center,
                         padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
@@ -655,12 +676,16 @@ pub fn spawn_game_ui(
         ))
         .id();
     let name_row = commands
-        .spawn(Node {
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            padding: UiRect::horizontal(Val::Px(2.0)),
-            ..default()
-        })
+        .spawn((
+            Button,
+            Action::ToggleCompany,
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                padding: UiRect::horizontal(Val::Px(2.0)),
+                ..default()
+            },
+        ))
         .with_children(|r| {
             crate::company::spawn_logo(r, &company, &logos, 34.0);
             r.spawn(text(f, true, 17.0, style::TEXT, company.name.clone()));
@@ -712,6 +737,17 @@ pub fn spawn_game_ui(
                 Action::SetView(View::Staff),
             );
             nav_button(p, &icons.lines, style::CBM_PURPLE, Action::ToggleLines);
+            // Only while the big map is open
+            p.spawn((crate::depot::MapUi, Node::default()))
+                .with_children(|m| {
+                    nav_button(m, &icons.stops, style::CBM_BLUE, Action::ToggleStations);
+                });
+            nav_button(
+                p,
+                &icons.depots,
+                style::rgb(0x6a, 0x7b, 0x8c),
+                Action::ToggleExtPanel,
+            );
             nav_button(
                 p,
                 &icons.research,
@@ -837,7 +873,7 @@ pub fn spawn_game_ui(
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
-                left: Val::Px(730.0),
+                left: Val::Px(840.0),
                 bottom: Val::Px(14.0),
                 padding: UiRect::all(Val::Px(8.0)),
                 column_gap: Val::Px(8.0),
@@ -895,7 +931,7 @@ pub fn spawn_game_ui(
                     false,
                     14.0,
                     style::TEXT,
-                    "a stop to add it  ·  a road to place a waypoint"
+                    "a stop to add it  ·  a road to place a waypoint  ·  B to build a new station"
                 ),
             ]
         )],
@@ -935,15 +971,12 @@ pub fn spawn_game_ui(
                     },
                     children![
                         button(f, "New line  (N)", Action::NewLine, BtnKind::Primary),
-                        button(f, "Station  (B)", Action::ToggleStation, BtnKind::Small),
-                        button(f, "Demolish  (X)", Action::ToggleDemolish, BtnKind::Small),
-                        button(f, "Depots", Action::ToggleExtPanel, BtnKind::Small),
                         text(
                             f,
                             false,
                             13.0,
                             style::MUTED,
-                            "Then click bus stops on the map, in order"
+                            "Then click bus stops on the map, in order  ·  click a stop to see its details"
                         ),
                     ]
                 ),
@@ -957,6 +990,7 @@ pub fn spawn_game_ui(
                     },
                     children![
                         (DrawText, text(f, true, 14.0, style::TEXT, "")),
+                        button(f, "Build station  (B)", Action::ToggleStation, BtnKind::Small),
                         text(
                             f,
                             false,
@@ -1246,9 +1280,11 @@ fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
         Action::OpenPanel(1) => "Build in the depot",
         Action::ToggleLines => "Lines",
         Action::ToggleResearch => "Research",
-        Action::ToggleStation => "Build your own bus station on a road",
-        Action::ToggleDemolish => "Demolish one of your own bus stations",
+        Action::ToggleStations => "All bus stations of the map",
+        Action::ToggleCompany => "Your company: reputation and customer reviews",
+        Action::ToggleStation => "Build a new station next to a road and add it to the line",
         Action::ToggleExtPanel => "External depots (needs the research)",
+        Action::ToggleFinance => "Finance: profit graphs, loans and ticket prices",
         Action::Menu => "Menu",
         Action::Finish => "Finish the line",
         Action::Cancel => "Cancel",
@@ -1261,6 +1297,7 @@ pub fn update_tooltip(
     hover: Res<Hover>,
     map: Res<MapData>,
     queues: Res<StopQueues>,
+    upgrades: Res<crate::stopup::StopUpgrades>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut node: Single<&mut Node, With<Tooltip>>,
     mut text: Single<&mut Text, With<TooltipText>>,
@@ -1295,8 +1332,11 @@ pub fn update_tooltip(
                 Some((map.stops.get(*d.get(k)?)?.name.clone(), n.floor() as i64))
             })();
             text.0 = format!(
-                "{}\n{} waiting · demand {:.1}",
-                stop.name, waiting as i64, stop.demand
+                "{}\n{} waiting · demand {:.1}\n{}",
+                stop.name,
+                waiting as i64,
+                stop.demand,
+                crate::stopup::tooltip_line(&upgrades, i)
             );
             if let Some((name, n)) = top {
                 let name = if name.is_empty() {

@@ -153,8 +153,13 @@ pub fn plan_click(
     cam: Single<(&Camera, &GlobalTransform, &Projection), With<MapCamera>>,
     map: Res<MapData>,
     mut draft: ResMut<Draft>,
+    stations: Res<crate::stations::Stations>,
 ) {
-    if *tool != Tool::Drawing || !mouse.just_pressed(MouseButton::Left) || block.0 {
+    if *tool != Tool::Drawing
+        || !mouse.just_pressed(MouseButton::Left)
+        || block.0
+        || stations.placing
+    {
         return;
     }
     if search.focus {

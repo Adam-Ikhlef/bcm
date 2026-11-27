@@ -452,7 +452,7 @@ fn make_stop_icon() -> Image {
     )
 }
 
-/// Red dot shown on a stop when people are waiting.
+/// Dot shown on a stop when people are waiting (colour set by the crowd, see `crowd_color`).
 fn make_badge_icon() -> Image {
     const N: u32 = 32;
     let px = 2.0 / N as f32;
@@ -462,10 +462,11 @@ fn make_badge_icon() -> Image {
             let x = (i as f32 + 0.5) / N as f32 * 2.0 - 1.0;
             let y = (j as f32 + 0.5) / N as f32 * 2.0 - 1.0;
             let r = x.hypot(y);
+            // White disc with a dark rim: tinted yellow / orange / red by how crowded the stop is.
             let c = mix(
-                [0.85, 0.12, 0.12],
+                [0.22, 0.22, 0.25],
                 [1.0, 1.0, 1.0],
-                1.0 - smooth(r - 0.72, px),
+                1.0 - smooth(r - 0.70, px),
             );
             let alpha = smooth(r - 1.0, px);
             data.extend_from_slice(&[
@@ -523,6 +524,7 @@ pub fn spawn_stops(mut commands: Commands, map: Res<MapData>, icons: Res<Icons>)
 pub fn update_stop_icons(
     cam: Single<&Projection, With<MapCamera>>,
     queues: Res<StopQueues>,
+    upgrades: Res<crate::stopup::StopUpgrades>,
     mut stops: Query<(&StopMarker, &mut Transform, &Children)>,
     mut badges: Query<(&mut Sprite, &mut Visibility), With<StopBadge>>,
 ) {
@@ -543,11 +545,23 @@ pub fn update_stop_icons(
                     *vis = want;
                 }
                 if waiting >= 5.0 {
-                    let t = (waiting / MAX_WAITING).min(1.0);
+                    let t = (waiting / upgrades.cap(marker.0).max(MAX_WAITING)).min(1.0);
                     sprite.custom_size = Some(Vec2::splat(9.0 + 9.0 * t));
+                    sprite.color = crowd_color(t);
                 }
             }
         }
+    }
+}
+
+/// Yellow when a few people wait, orange when it fills up, red when the platform is nearly full.
+pub fn crowd_color(t: f32) -> Color {
+    if t < 0.34 {
+        Color::srgb(1.0, 0.80, 0.10)
+    } else if t < 0.67 {
+        Color::srgb(1.0, 0.50, 0.10)
+    } else {
+        Color::srgb(0.90, 0.12, 0.12)
     }
 }
 

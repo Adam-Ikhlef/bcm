@@ -249,19 +249,31 @@ fn tile_path(origin: (f64, f64), x: i32, y: i32) -> PathBuf {
     ))
 }
 
-fn tile_query(origin: (f64, f64), x: i32, y: i32, cities: &[&Place]) -> String {
+fn tile_query(origin: (f64, f64), x: i32, y: i32) -> String {
     let [s, w, n, e] = tile_bounds(origin, x, y);
-    let areas: String = cities
-        .iter()
-        .map(|p| format!("area(id:{});", p.osm_id + 3_600_000_000))
-        .collect();
-    // Everything in the square, except what the already loaded cities contain.
+    // Same simple form as the city query; duplicates of the loaded cities are removed in Rust.
     format!(
-        "[out:json][timeout:240];({areas})->.h;({})->.all;({})->.inh;(.all;-.inh;)->.res;\
-         .res out body;.res >;out skel qt;",
+        "[out:json][timeout:240];({});out body;>;out skel qt;",
         selectors(&format!("({s:.6},{w:.6},{n:.6},{e:.6})"), false),
-        selectors("(area.h)", false),
     )
+}
+
+/// Turns a failed request into a message that includes the server's own explanation.
+fn http_error(url: &str, e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, resp) => {
+            let body = resp.into_string().unwrap_or_default();
+            let body: String = body
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(300)
+                .collect();
+            format!("{url}: HTTP {code} {body}")
+        }
+        e => format!("{url}: {e}"),
+    }
 }
 
 fn post_query(query: &str, dest: &std::path::Path) -> Result<(), String> {
@@ -275,15 +287,20 @@ fn post_query(query: &str, dest: &std::path::Path) -> Result<(), String> {
                 fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
                 return Ok(());
             }
-            Err(e) => last_err = format!("{url}: {e}"),
+            Err(e) => last_err = http_error(url, e),
         }
     }
     Err(last_err)
 }
 
-fn load_tile_file(path: &std::path::Path, bounds: [f64; 4]) -> Result<MapData, String> {
+fn load_tile_file(
+    path: &std::path::Path,
+    bounds: [f64; 4],
+    existing: &osm::Existing,
+) -> Result<MapData, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
-    osm::load_overpass_in(BufReader::new(file), Some(bounds)).map_err(|e| e.to_string())
+    osm::load_overpass_in(BufReader::new(file), Some(bounds), Some(existing))
+        .map_err(|e| e.to_string())
 }
 
 /// Loads tile (x, y) from the cache or downloads it. A tile without any road is an empty
@@ -292,7 +309,7 @@ fn download_tile(
     origin: (f64, f64),
     x: i32,
     y: i32,
-    cities: &[&Place],
+    existing: &osm::Existing,
     refresh: bool,
 ) -> Result<MapData, String> {
     fs::create_dir_all(cache_dir()).map_err(|e| e.to_string())?;
@@ -300,8 +317,8 @@ fn download_tile(
     let bounds = tile_bounds(origin, x, y);
     if refresh || !path.exists() {
         let fresh = path.with_extension("new");
-        post_query(&tile_query(origin, x, y, cities), &fresh)?;
-        match load_tile_file(&fresh, bounds) {
+        post_query(&tile_query(origin, x, y), &fresh)?;
+        match load_tile_file(&fresh, bounds, existing) {
             Ok(map) => {
                 fs::rename(&fresh, &path).map_err(|e| e.to_string())?;
                 return Ok(map);
@@ -312,7 +329,7 @@ fn download_tile(
             }
         }
     }
-    load_tile_file(&path, bounds).inspect_err(|_| {
+    load_tile_file(&path, bounds, existing).inspect_err(|_| {
         let _ = fs::remove_file(&path);
     })
 }
@@ -337,7 +354,7 @@ fn fetch(place: &Place, dest: &std::path::Path) -> Result<(), String> {
                 fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
                 return Ok(());
             }
-            Err(e) => last_err = format!("{url}: {e}"),
+            Err(e) => last_err = http_error(url, e),
         }
     }
     Err(last_err)
@@ -399,10 +416,10 @@ pub fn load_region(region: &Region, refresh: bool) -> Result<MapData, String> {
         progress_done_part();
     }
     if let Some(origin) = region.tile_origin {
-        let cities = region.cities();
+        let existing = osm::Existing::from_map(&map);
         for &(x, y) in &region.tiles {
             progress_part(&format!("Downloading {}", tile_name(x, y)));
-            let t = tile_or_empty(download_tile(origin, x, y, &cities, refresh))
+            let t = tile_or_empty(download_tile(origin, x, y, &existing, refresh))
                 .map_err(|e| format!("{}: {e}", tile_name(x, y)))?;
             if let Some(t) = t {
                 map.merge(t);
@@ -566,8 +583,8 @@ mod tests {
         ]}"#;
         let south_tile = [32.95, -7.1, 33.05, -6.9];
         let north_tile = [33.05, -7.1, 33.15, -6.9];
-        let a = osm::load_overpass_in(json.as_bytes(), Some(south_tile)).unwrap();
-        let b = osm::load_overpass_in(json.as_bytes(), Some(north_tile)).unwrap();
+        let a = osm::load_overpass_in(json.as_bytes(), Some(south_tile), None).unwrap();
+        let b = osm::load_overpass_in(json.as_bytes(), Some(north_tile), None).unwrap();
         assert_eq!(a.roads.len(), 1);
         assert_eq!(b.roads.len(), 1);
         let all = osm::load_overpass(json.as_bytes()).unwrap();
@@ -575,16 +592,30 @@ mod tests {
     }
 
     #[test]
-    fn tile_queries_leave_out_the_loaded_cities() {
-        let home = Place {
-            osm_type: "relation".into(),
-            osm_id: 7,
-            display_name: "Home".into(),
-        };
-        let q = tile_query((33.0, -7.0), 0, 1, &[&home]);
-        assert!(q.contains("area(id:3600000007)"));
-        assert!(q.contains("(.all;-.inh;)"));
+    fn tile_query_is_the_simple_bbox_form() {
+        let q = tile_query((33.0, -7.0), 0, 1);
+        assert!(q.starts_with("[out:json]"));
+        assert!(q.contains("32.99") || q.contains("33.0"));
         assert!(!q.contains("route"), "tiles skip bus route relations");
+        assert!(!q.contains("area"), "no area subtraction");
+        assert!(!q.contains("-."), "no difference operator");
+    }
+
+    #[test]
+    fn data_already_in_the_map_is_not_added_twice() {
+        let json = r#"{"elements":[
+            {"type":"way","id":1,"nodes":[1,2],"tags":{"highway":"residential"}},
+            {"type":"way","id":2,"nodes":[3,4],"tags":{"highway":"residential"}},
+            {"type":"node","id":1,"lat":33.01,"lon":-7.0},
+            {"type":"node","id":2,"lat":33.02,"lon":-7.0},
+            {"type":"node","id":3,"lat":33.03,"lon":-7.0},
+            {"type":"node","id":4,"lat":33.04,"lon":-7.0}
+        ]}"#;
+        let city = osm::load_overpass(json.as_bytes()).unwrap();
+        let ex = osm::Existing::from_map(&city);
+        let none =
+            osm::load_overpass_in(json.as_bytes(), Some([32.9, -7.1, 33.1, -6.9]), Some(&ex));
+        assert!(none.is_err() || none.unwrap().roads.is_empty());
     }
 
     #[test]

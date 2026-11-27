@@ -191,6 +191,7 @@ pub fn spawn_bus(
     depot: &DepotSite,
     leg: Option<Vec<Vec2>>,
     fuel_mult: f32,
+    wear_mult: f32,
     icon: Handle<Image>,
 ) {
     let (start, path, phase) = match &leg {
@@ -210,7 +211,7 @@ pub fn spawn_bus(
             capacity: spec.capacity,
             run_cost: spec.run_cost,
             fuel_per_m: spec.fuel_per_km / 1000.0 * wear_multiplier() * driver_eff * fuel_mult,
-            wear_per_m: spec.wear_per_km / 1000.0 * wear_multiplier() * driver_eff,
+            wear_per_m: spec.wear_per_km / 1000.0 * wear_multiplier() * driver_eff * wear_mult,
             phase,
             path,
             pi: 1,
@@ -287,7 +288,8 @@ pub fn advance_departures(
                 d.wait_until,
                 &site,
                 leg,
-                research.fuel_mult(),
+                research.fuel_mult() * fleet.get(id).map_or(1.0, |b| b.fuel_mult()),
+                fleet.get(id).map_or(1.0, |b| b.wear_mult()),
                 crate::busicon::icon_for(spec_idx, rgb, pattern),
             );
         }

@@ -1416,6 +1416,36 @@ pub fn rebuild_panel(
                                 b.fuel, b.condition, b.clean
                             )
                         ),
+                        text(f, true, 12.0, style::TEXT, "Upgrades"),
+                        (
+                            Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(6.0),
+                                row_gap: Val::Px(4.0),
+                                ..default()
+                            },
+                            Children::spawn(bevy::ecs::spawn::SpawnWith({
+                                let f = f.clone();
+                                let (id, mask) = (b.id, b.upgrades);
+                                move |row: &mut bevy::ecs::relationship::RelatedSpawner<ChildOf>| {
+                                    for (k, (name, price, _)) in
+                                        crate::fleet::UPGRADES.iter().enumerate()
+                                    {
+                                        let have = mask & (1 << k) != 0;
+                                        row.spawn(button(
+                                            &f,
+                                            if have {
+                                                format!("✔ {name}")
+                                            } else {
+                                                format!("{name}  {}", fmt_money(*price))
+                                            },
+                                            Action::BusUpgrade(id, k as u8),
+                                            if have { BtnKind::Primary } else { BtnKind::Small },
+                                        ));
+                                    }
+                                }
+                            }))
+                        ),
                         (
                             Node {
                                 column_gap: Val::Px(8.0),
@@ -1625,6 +1655,29 @@ pub fn depot_actions(
                     fleet.version += 1;
                     eco.say(&real, "Bus serviced");
                 }
+            }
+            Action::BusUpgrade(id, k) => {
+                let Some(&(name, price, _)) = crate::fleet::UPGRADES.get(k as usize) else {
+                    continue;
+                };
+                let Some(b) = fleet.get(id) else { continue };
+                if b.has_upgrade(k as usize) {
+                    continue;
+                }
+                if b.line.is_some() || b.depart.is_some() {
+                    eco.say(&real, "Upgrades are fitted while the bus is parked");
+                    continue;
+                }
+                if eco.money < price {
+                    eco.say(&real, format!("{name} costs {}", fmt_money(price)));
+                    continue;
+                }
+                eco.money -= price;
+                if let Some(b) = fleet.get_mut(id) {
+                    b.upgrades |= 1 << k;
+                }
+                fleet.version += 1;
+                eco.say(&real, format!("{name} fitted"));
             }
             Action::Sell(id) => {
                 let Some(b) = fleet.get(id) else { continue };

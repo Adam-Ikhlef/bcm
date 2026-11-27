@@ -44,13 +44,13 @@ impl GameMode {
     pub fn blurb(self) -> &'static str {
         match self {
             GameMode::Casual => {
-                "A relaxed start: more money and cheaper drivers. Good for learning the game."
+                "A relaxed start: more money, cheaper drivers and fuel, slower wear, more riders and cheaper loans. No random events."
             }
             GameMode::Realistic => {
-                "The full challenge: limited money and full wages. Every decision counts."
+                "The full challenge: limited money, full wages and costs, and random events like fuel price surges, rain and road works."
             }
             GameMode::Sandbox => {
-                "Unlimited money and no wages. Build any network you like, no pressure."
+                "Unlimited money, no wages, no running costs or wear. Build any network you like, no pressure."
             }
         }
     }
@@ -131,6 +131,8 @@ struct LineSave {
     recipe: Vec<SavedWp>,
     income: f64,
     cost: f64,
+    #[serde(default = "crate::finance::default_fare")]
+    fare: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -147,6 +149,8 @@ struct BusSave {
     /// Depot the bus lives in (0 = main depot).
     #[serde(default)]
     home: usize,
+    #[serde(default)]
+    upgrades: u8,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -206,6 +210,12 @@ pub struct SaveData {
     stations_gone: Vec<usize>,
     #[serde(default)]
     ext_depots: Vec<crate::extdepot::ExtSave>,
+    #[serde(default)]
+    finance: crate::finance::FinSave,
+    #[serde(default)]
+    stop_upgrades: Vec<(usize, u8)>,
+    #[serde(default)]
+    reviews: crate::reviews::ReviewsSave,
     /// Research in progress: (tech, finishing game minute).
     #[serde(default)]
     research_active: Option<(usize, f64)>,
@@ -330,6 +340,7 @@ pub fn collect(world: &World) -> Option<SaveData> {
                 recipe: l.recipe.clone(),
                 income: l.income,
                 cost: l.cost,
+                fare: l.fare,
             })
             .collect(),
         buses: fleet
@@ -337,6 +348,7 @@ pub fn collect(world: &World) -> Option<SaveData> {
             .iter()
             .map(|b| BusSave {
                 home: b.home,
+                upgrades: b.upgrades,
                 plate: b.plate.clone(),
                 spec: catalog
                     .0
@@ -366,6 +378,18 @@ pub fn collect(world: &World) -> Option<SaveData> {
                     .map(|o| (o.pos.x, o.pos.y, o.name.clone()))
                     .collect()
             })
+            .unwrap_or_default(),
+        reviews: world
+            .get_resource::<crate::reviews::Reviews>()
+            .map(crate::reviews::collect)
+            .unwrap_or_default(),
+        stop_upgrades: world
+            .get_resource::<crate::stopup::StopUpgrades>()
+            .map(crate::stopup::collect)
+            .unwrap_or_default(),
+        finance: world
+            .get_resource::<crate::finance::Finance>()
+            .map(crate::finance::collect)
             .unwrap_or_default(),
         ext_depots: world
             .get_resource::<crate::extdepot::ExtDepots>()
@@ -468,6 +492,9 @@ pub fn apply_pending_load(world: &mut World) {
             Some(mut l) => {
                 l.income = ls.income;
                 l.cost = ls.cost;
+                l.fare = ls
+                    .fare
+                    .clamp(crate::finance::MIN_FARE, crate::finance::MAX_FARE);
                 map_idx.push(Some(lines.0.len()));
                 lines.0.push(l);
             }
@@ -505,6 +532,7 @@ pub fn apply_pending_load(world: &mut World) {
             fb.fuel = b.fuel;
             fb.condition = b.condition;
             fb.clean = b.clean;
+            fb.upgrades = b.upgrades & 0b111;
             fb.paint = b.paint.map(|(r, g, bl, pattern)| crate::fleet::Paint {
                 rgb: (r, g, bl),
                 pattern,
@@ -521,6 +549,10 @@ pub fn apply_pending_load(world: &mut World) {
     staff.version += 1;
 
     world.insert_resource(ext);
+    world.insert_resource(crate::finance::restore(&data.finance));
+    world.insert_resource(crate::reviews::restore(&data.reviews));
+    let stop_count = map.stops.len();
+    world.insert_resource(crate::stopup::restore(&data.stop_upgrades, stop_count));
     world.insert_resource(map);
     world.insert_resource(catalog);
     world.insert_resource(lines);

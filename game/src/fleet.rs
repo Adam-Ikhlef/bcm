@@ -543,12 +543,59 @@ pub struct FleetBus {
     /// The line this bus is assigned to (it leaves the depot for that line's departures).
     pub assigned: Option<usize>,
     pub depart: Option<Depart>,
+    /// Bought upgrades (bit mask, see `UPGRADES`).
+    pub upgrades: u8,
 }
 
+/// Bus upgrades: (name, price, what it does).
+pub const UPGRADES: [(&str, f64, &str); 3] = [
+    ("Engine tune", 2_000.0, "15% less fuel"),
+    ("Reinforced parts", 1_500.0, "25% less wear"),
+    ("Comfort seats + A/C", 2_500.0, "10% more per ticket"),
+];
+
 impl FleetBus {
+    pub fn has_upgrade(&self, k: usize) -> bool {
+        self.upgrades & (1 << k) != 0
+    }
+
+    pub fn fuel_mult(&self) -> f32 {
+        if self.has_upgrade(0) {
+            0.85
+        } else {
+            1.0
+        }
+    }
+
+    pub fn wear_mult(&self) -> f32 {
+        if self.has_upgrade(1) {
+            0.75
+        } else {
+            1.0
+        }
+    }
+
+    pub fn fare_mult(&self) -> f64 {
+        if self.has_upgrade(2) {
+            1.10
+        } else {
+            1.0
+        }
+    }
+
+    /// Part of the upgrade prices that comes back when the bus is sold.
+    pub fn upgrade_value(&self) -> f64 {
+        UPGRADES
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| self.has_upgrade(*k))
+            .map(|(_, u)| u.1 * 0.4)
+            .sum()
+    }
+
     /// What the bus would sell for: worn buses are worth less.
     pub fn sell_value(&self, new_price: f64) -> f64 {
-        new_price * (0.3 + 0.4 * (self.condition as f64 / 100.0))
+        new_price * (0.3 + 0.4 * (self.condition as f64 / 100.0)) + self.upgrade_value()
     }
 
     pub fn needs_service(&self) -> bool {
@@ -760,6 +807,7 @@ impl Fleet {
             home,
             assigned: None,
             depart: None,
+            upgrades: 0,
         });
         self.version += 1;
         Some(id)
@@ -829,6 +877,30 @@ impl Fleet {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bus_upgrades_save_fuel_wear_and_add_income() {
+        let mut f = Fleet::default();
+        let b = FleetBus {
+            id: 1,
+            paint: None,
+            plate: String::new(),
+            spec: 0,
+            fuel: 100.0,
+            condition: 100.0,
+            clean: 100.0,
+            line: None,
+            bay: None,
+            home: 0,
+            assigned: None,
+            depart: None,
+            upgrades: 0b111,
+        };
+        f.buses.push(b);
+        let b = &f.buses[0];
+        assert!(b.fuel_mult() < 1.0 && b.wear_mult() < 1.0 && b.fare_mult() > 1.0);
+        assert!(b.sell_value(10_000.0) > 10_000.0 * 0.7 + 2_000.0);
+    }
+
     use super::*;
 
     fn stands(f: &mut Fleet, n: i32) {

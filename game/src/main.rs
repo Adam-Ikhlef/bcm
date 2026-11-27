@@ -6,9 +6,11 @@ mod demand;
 mod depot;
 mod dispatch;
 mod extdepot;
+mod finance;
 mod fleet;
 mod lot;
 mod menu;
+mod modes;
 mod net;
 mod ops;
 mod osm;
@@ -16,12 +18,15 @@ mod planner;
 mod presence;
 mod render;
 mod research;
+mod reviews;
 mod save;
 mod settings;
 mod sidebar;
 mod site;
 mod staffui;
 mod stations;
+mod stopcard;
+mod stopup;
 mod style;
 mod ui;
 mod update;
@@ -48,7 +53,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 // --- Economy tuning ---------------------------------------------------------
 const START_MONEY: f64 = 18_000.0;
 pub const BUS_SPEED: f32 = 36.0; // m/s on the map (game pace: 1 game hour = 6 real minutes)
-const FARE: f64 = 1.5;
 const DWELL_SECONDS: f32 = 3.0;
 const PASSENGER_RATE: f32 = 0.4; // passengers per real second per unit of stop demand (1 game hour = 6 real minutes)
 const CLEAN_LOSS_PER_RIDER: f32 = 0.03; // percent
@@ -83,6 +87,8 @@ pub struct BusLine {
     pub depot_len: f32,
     pub income: f64,
     pub cost: f64,
+    /// Ticket price on this line.
+    pub fare: f64,
     /// How the line was planned (stops and waypoints), so it can be rebuilt when loading a save.
     pub recipe: Vec<save::SavedWp>,
 }
@@ -118,6 +124,7 @@ pub fn build_line(
         depot_len,
         income: 0.0,
         cost: 0.0,
+        fare: finance::BASE_FARE,
         recipe,
     })
 }
@@ -295,6 +302,11 @@ fn main() {
     .init_resource::<bus_menu::BuyState>()
     .init_resource::<bus_menu::Market>()
     .init_resource::<extdepot::ExtDepots>()
+    .init_resource::<finance::Finance>()
+    .init_resource::<stopup::StopUpgrades>()
+    .init_resource::<stopcard::StopCard>()
+    .init_resource::<modes::Conditions>()
+    .init_resource::<reviews::Reviews>()
     .init_resource::<bus_menu::Thumbs>()
     .init_resource::<sidebar::Missions>()
     .init_resource::<save::PendingLoad>()
@@ -414,6 +426,19 @@ fn main() {
             extdepot::ext_names,
             extdepot::ext_markers,
             extdepot::ext_ui,
+            stopup::up_gizmos,
+            modes::update_conditions,
+            reviews::write_reviews,
+            reviews::review_actions,
+            reviews::review_ui,
+            stopcard::card_actions,
+            stopcard::card_click,
+            stopcard::card_keys,
+            stopcard::card_ring,
+            stopcard::card_ui,
+            finance::fin_actions,
+            finance::fin_daily,
+            finance::fin_ui,
         )
             .run_if(in_state(AppState::Playing)),
     )
@@ -475,7 +500,6 @@ fn main() {
                 (
                     stations::station_actions,
                     stations::station_click,
-                    stations::station_demolish,
                     stations::station_preview,
                     research::research_actions,
                     research::research_tick,
@@ -537,6 +561,12 @@ fn init_game(
         ..default()
     });
     commands.insert_resource(Lines::default());
+    commands.insert_resource(finance::Finance::default());
+    commands.insert_resource(stopup::StopUpgrades::default());
+    commands.insert_resource(stopcard::StopCard::default());
+    commands.insert_resource(modes::Conditions::default());
+    commands.insert_resource(reviews::Reviews::default());
+    commands.insert_resource(extdepot::ExtDepots::default());
     commands.insert_resource(Draft::default());
     commands.insert_resource(Tool::Idle);
     commands.insert_resource(Hover::default());
@@ -749,11 +779,8 @@ fn hotkeys(
         if keys.just_pressed(KeyCode::KeyN) && *tool == Tool::Idle {
             events.write(UiAction(Action::NewLine));
         }
-        if keys.just_pressed(KeyCode::KeyB) && *tool == Tool::Idle {
+        if keys.just_pressed(KeyCode::KeyB) && *tool == Tool::Drawing {
             events.write(UiAction(Action::ToggleStation));
-        }
-        if keys.just_pressed(KeyCode::KeyX) && *tool == Tool::Idle {
-            events.write(UiAction(Action::ToggleDemolish));
         }
         if keys.just_pressed(KeyCode::Enter) && *tool == Tool::Drawing {
             events.write(UiAction(Action::Finish));
@@ -960,15 +987,26 @@ fn spawn_passengers(
     weights: Res<DestWeights>,
     research: Res<research::Research>,
     buses: Query<&dispatch::Bus>,
+    lines: Res<Lines>,
+    upgrades: Res<stopup::StopUpgrades>,
+    cond: Res<modes::Conditions>,
 ) {
     let dt = time.delta_secs();
     let tod = ops::demand_factor(clock.minute_of_day());
     // Only stops that a running bus (a shift in progress) serves create demand.
+    // The ticket prices of those lines decide how many people come (average over the buses).
     let mut served = vec![false; map.stops.len()];
+    let mut price = vec![(0.0f32, 0u32); map.stops.len()];
     for b in &buses {
+        let factor = lines
+            .0
+            .get(b.line)
+            .map_or(1.0, |l| finance::fare_factor(l.fare));
         for s in b.route.stop_at.iter().flatten() {
             if let Some(x) = served.get_mut(*s) {
                 *x = true;
+                price[*s].0 += factor;
+                price[*s].1 += 1;
             }
         }
     }
@@ -983,14 +1021,27 @@ fn spawn_passengers(
             queues.waiting[i] = slots.iter().sum();
             continue;
         }
-        let new = s.demand * PASSENGER_RATE * tod * dt * research.demand_mult();
+        let fare_mult = if price[i].1 > 0 {
+            price[i].0 / price[i].1 as f32
+        } else {
+            1.0
+        };
+        let new = s.demand
+            * PASSENGER_RATE
+            * tod
+            * dt
+            * research.demand_mult()
+            * fare_mult
+            * upgrades.demand_mult(i)
+            * cond.demand;
         for (slot, share) in slots.iter_mut().zip(w) {
             *slot += new * share;
         }
         // The platform only holds so many people: scale everybody down together.
         let total: f32 = slots.iter().sum();
-        if total > MAX_WAITING {
-            let k = MAX_WAITING / total;
+        let cap = upgrades.cap(i);
+        if total > cap {
+            let k = cap / total;
             slots.iter_mut().for_each(|x| *x *= k);
         }
         queues.waiting[i] = slots.iter().sum();
@@ -1043,11 +1094,14 @@ fn move_buses(
     mut fleet: ResMut<Fleet>,
     mut staff: ResMut<Staff>,
     ext: Res<extdepot::ExtDepots>,
+    cond: Res<modes::Conditions>,
     mut buses: Query<(Entity, &mut Bus, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
     for (entity, mut bus, mut tf) in &mut buses {
         let mut traveled = 0.0f32;
+        let fare = lines.0.get(bus.line).map_or(finance::BASE_FARE, |l| l.fare)
+            * fleet.get(bus.fleet).map_or(1.0, |b| b.fare_mult());
         let mut earned = 0.0f64;
         let mut boarded_now = 0.0f32;
         let mut arrived_home = false;
@@ -1065,7 +1119,7 @@ fn move_buses(
                         let board =
                             demand::board(&mut queues, si, &mut b.cargo, space, &b.route, 0);
                         bus.load += board;
-                        earned += board as f64 * FARE;
+                        earned += board as f64 * fare;
                         eco.boarded += board as u64;
                         boarded_now += board;
                     }
@@ -1124,7 +1178,7 @@ fn move_buses(
                                 demand::board(&mut queues, si, &mut b.cargo, space, &b.route, idx)
                             };
                             bus.load += board;
-                            earned += board as f64 * FARE;
+                            earned += board as f64 * fare;
                             eco.boarded += board as u64;
                             boarded_now += board;
                             bus.dwell = DWELL_SECONDS;
@@ -1151,7 +1205,7 @@ fn move_buses(
             }
         }
 
-        let cost = traveled as f64 * bus.run_cost;
+        let cost = traveled as f64 * bus.run_cost * cond.cost as f64;
         if cost != 0.0 || earned != 0.0 {
             eco.money += earned - cost;
             eco.income += earned;
@@ -1167,7 +1221,7 @@ fn move_buses(
         if let Some(fb) = fleet.get_mut(bus.fleet) {
             if traveled > 0.0 || boarded_now > 0.0 {
                 fb.fuel = (fb.fuel - traveled * bus.fuel_per_m).max(0.0);
-                fb.condition = (fb.condition - traveled * bus.wear_per_m).max(0.0);
+                fb.condition = (fb.condition - traveled * bus.wear_per_m * cond.wear).max(0.0);
                 fb.clean = (fb.clean - boarded_now * CLEAN_LOSS_PER_RIDER).max(0.0);
             }
             worn_out = fb.needs_service();
