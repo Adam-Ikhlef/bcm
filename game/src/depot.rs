@@ -1538,6 +1538,60 @@ pub fn rebuild_panel(
                                 b.fuel, b.condition, b.clean
                             )
                         ),
+                        text(f, true, 12.0, style::TEXT, "Maintenance"),
+                        (
+                            Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(6.0),
+                                row_gap: Val::Px(4.0),
+                                ..default()
+                            },
+                            Children::spawn(bevy::ecs::spawn::SpawnWith({
+                                let f = f.clone();
+                                let (id, parts) = (b.id, b.parts);
+                                move |row: &mut bevy::ecs::relationship::RelatedSpawner<ChildOf>| {
+                                    for (k, (name, _, _)) in crate::fleet::PARTS.iter().enumerate() {
+                                        let h = parts[k];
+                                        row.spawn(button(
+                                            &f,
+                                            format!("{name} {h:.0}%"),
+                                            Action::BusPart(id, k as u8),
+                                            if h < 40.0 { BtnKind::Primary } else { BtnKind::Small },
+                                        ));
+                                    }
+                                }
+                            }))
+                        ),
+                        text(f, true, 12.0, style::TEXT, "Equipment"),
+                        (
+                            Node {
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(6.0),
+                                row_gap: Val::Px(4.0),
+                                ..default()
+                            },
+                            Children::spawn(bevy::ecs::spawn::SpawnWith({
+                                let f = f.clone();
+                                let (id, mask) = (b.id, b.equipment);
+                                move |row: &mut bevy::ecs::relationship::RelatedSpawner<ChildOf>| {
+                                    for (k, (name, price, _)) in
+                                        crate::fleet::EQUIPMENT.iter().enumerate()
+                                    {
+                                        let have = mask & (1 << k) != 0;
+                                        row.spawn(button(
+                                            &f,
+                                            if have {
+                                                format!("✔ {name}")
+                                            } else {
+                                                format!("{name}  {}", fmt_money(*price))
+                                            },
+                                            Action::BusEquip(id, k as u8),
+                                            if have { BtnKind::Primary } else { BtnKind::Small },
+                                        ));
+                                    }
+                                }
+                            }))
+                        ),
                         text(f, true, 12.0, style::TEXT, "Upgrades"),
                         (
                             Node {
@@ -1662,6 +1716,11 @@ pub fn depot_actions(
             Action::PaintPick(i) => st.paint = i,
             Action::BuyHome => st.home = (st.home + 1) % (ext.list.len() + 1),
             Action::PatternPick(i) => st.pattern = i,
+            Action::NewEquip(k) => {
+                if (k as usize) < crate::fleet::EQUIPMENT.len() {
+                    st.equipment = crate::fleet::normalize_equipment(st.equipment ^ (1 << k));
+                }
+            }
             Action::BuyUsed(k) => {
                 let Some(u) = market.items.get(k).cloned() else {
                     continue;
@@ -1688,6 +1747,11 @@ pub fn depot_actions(
                     fleet.add_at(home, u.spec, Some(u.paint), u.fuel, u.condition, u.clean)
                 {
                     eco.money -= u.price;
+                    if let Some(b) = fleet.get_mut(id) {
+                        b.equipment = crate::fleet::normalize_equipment(
+                            ((id.wrapping_mul(2_654_435_761) >> 7) & 0x7f) as u16,
+                        );
+                    }
                     selected.0 = Some(id);
                     market.items.remove(k);
                     market.version += 1;
@@ -1707,7 +1771,7 @@ pub fn depot_actions(
                     0
                 };
                 let free = fleet.free_at(home);
-                let total = spec.price * n as f64;
+                let total = (spec.price + crate::fleet::equipment_price(st.equipment)) * n as f64;
                 if fleet.capacity(home) == 0 {
                     eco.say(&real, "Build a parking stand first (Build button)");
                 } else if free < n {
@@ -1729,6 +1793,9 @@ pub fn depot_actions(
                     let mut last = None;
                     for _ in 0..n {
                         last = fleet.add_at(home, i, paint, 100.0, 100.0, 100.0);
+                        if let Some(b) = last.and_then(|id| fleet.get_mut(id)) {
+                            b.equipment = st.equipment;
+                        }
                     }
                     eco.money -= total;
                     if last.is_some() {
@@ -1769,6 +1836,7 @@ pub fn depot_actions(
                         }
                         if repair {
                             b.condition = 100.0;
+                            b.parts = [100.0; 7];
                         }
                         if wash {
                             b.clean = 100.0;
@@ -1801,6 +1869,56 @@ pub fn depot_actions(
                 fleet.version += 1;
                 eco.say(&real, format!("{name} fitted"));
             }
+            Action::BusPart(id, k) => {
+                let Some(b) = fleet.get(id) else { continue };
+                let k = k as usize;
+                if k >= crate::fleet::PARTS.len() {
+                    continue;
+                }
+                let cost = b.part_cost(k);
+                if b.line.is_some() || b.depart.is_some() || b.arriving {
+                    eco.say(&real, "Parts are renewed while the bus is parked");
+                } else if !fleet.has_room(Room::Workshop) {
+                    eco.say(&real, "Build a workshop to renew parts");
+                } else if cost < 0.5 {
+                    eco.say(&real, "This part is as good as new");
+                } else if eco.money < cost {
+                    eco.say(&real, format!("Not enough money: {}", fmt_money(cost)));
+                } else {
+                    eco.money -= cost;
+                    eco.costs += cost;
+                    if let Some(b) = fleet.get_mut(id) {
+                        b.parts[k] = 100.0;
+                    }
+                    eco.say(&real, format!("{} renewed", crate::fleet::PARTS[k].0));
+                }
+            }
+            Action::BusEquip(id, k) => {
+                let Some(&(name, price, _)) = crate::fleet::EQUIPMENT.get(k as usize) else {
+                    continue;
+                };
+                let Some(b) = fleet.get(id) else { continue };
+                if b.has_equipment(k as usize) {
+                    continue;
+                }
+                if b.depart.is_some() || b.arriving {
+                    eco.say(&real, "Equipment is fitted while the bus is parked");
+                    continue;
+                }
+                if (1u16 << k) & crate::fleet::NEEDS_IBIS != 0 && !b.has_equipment(0) {
+                    eco.say(&real, format!("{name} needs the IBIS first"));
+                    continue;
+                }
+                if eco.money < price {
+                    eco.say(&real, format!("{name} costs {}", fmt_money(price)));
+                    continue;
+                }
+                eco.money -= price;
+                if let Some(b) = fleet.get_mut(id) {
+                    b.equipment |= 1 << k;
+                }
+                eco.say(&real, format!("{name} fitted"));
+            }
             Action::Sell(id) => {
                 let Some(b) = fleet.get(id) else { continue };
                 if b.line.is_some() || b.depart.is_some() {
@@ -1824,6 +1942,9 @@ fn sign_text(
     lines: &crate::Lines,
     map: &crate::osm::MapData,
 ) -> String {
+    if !b.sign_works() {
+        return String::new();
+    }
     let li = b.depart.map(|d| d.line).or(b.assigned);
     let Some(li) = li else {
         return "NO SERVICE".to_string();

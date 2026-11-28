@@ -150,6 +150,7 @@ pub fn update_conditions(
     mut cond: ResMut<Conditions>,
     reviews: Res<crate::reviews::Reviews>,
     contracts: Res<crate::contracts::Contracts>,
+    fleet: Res<crate::fleet::Fleet>,
     mut eco: ResMut<Economy>,
     real: Res<Time<Real>>,
 ) {
@@ -176,8 +177,22 @@ pub fn update_conditions(
     let (d, c, w) = cond
         .event
         .map_or((1.0, 1.0, 1.0), |(e, _)| (e.demand, e.cost, e.wear));
-    cond.demand =
-        session.mode.demand_factor() * d * reviews.demand_mult() * contracts.demand_mult();
+    let serving: Vec<f32> = fleet
+        .buses
+        .iter()
+        .filter(|b| b.assigned.is_some())
+        .map(|b| b.rider_bonus())
+        .collect();
+    let equipment_riders = if serving.is_empty() {
+        0.0
+    } else {
+        serving.iter().sum::<f32>() / serving.len() as f32
+    };
+    cond.demand = session.mode.demand_factor()
+        * d
+        * reviews.demand_mult()
+        * contracts.demand_mult()
+        * (1.0 + equipment_riders);
     cond.cost = session.mode.cost_factor() * c * contracts.fuel_mult();
     cond.wear = session.mode.wear_factor() * w * contracts.wear_mult();
     cond.income = contracts.income_mult();

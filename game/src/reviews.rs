@@ -130,6 +130,9 @@ enum Aspect {
     Price(String, f64),
     Comfort(String),
     Shelter(usize),
+    Equip(String, u8),
+    Bare(String, u8),
+    Worn(String, u8),
 }
 
 fn review_text(a: &Aspect, map: &MapData, company: &str, stars: u8) -> String {
@@ -157,6 +160,17 @@ fn review_text(a: &Aspect, map: &MapData, company: &str, stars: u8) -> String {
         Aspect::Price(l, _) if stars <= 2 => format!("{l} is far too expensive for what it is."),
         Aspect::Price(l, _) => format!("Cheap tickets on {l}, I ride it every day."),
         Aspect::Comfort(p) => format!("Comfy seats and air conditioning on {p}!"),
+        Aspect::Equip(p, 5) => format!("Wi-Fi on {p}. I can work on my way in!"),
+        Aspect::Equip(p, 4) => format!("USB ports on {p}: my phone arrived fully charged."),
+        Aspect::Equip(p, 2) => format!("Clear stop announcements on {p}, even for visitors."),
+        Aspect::Equip(p, _) => format!("The info screen on {p} shows the next stops. Very handy."),
+        Aspect::Worn(p, 1) => format!("The wipers on {p} smear everything. Scary in the rain."),
+        Aspect::Worn(p, 4) => format!("{p} has a broken blinker. Drives like a mystery."),
+        Aspect::Worn(p, _) => format!("{p} has dim headlights. Felt unsafe after dark."),
+        Aspect::Bare(p, 1) => format!("{p} has no card validator: boarding takes forever."),
+        Aspect::Bare(p, _) => {
+            format!("{p} has no stop announcements or info screen. I missed my stop.")
+        }
         Aspect::Shelter(i) => format!("Finally a proper shelter at {}.", stop(*i)),
     }
 }
@@ -224,6 +238,22 @@ pub fn write_reviews(
             if b.has_upgrade(2) {
                 aspects.push(Aspect::Comfort(b.plate.clone()));
             }
+            for k in [5u8, 4, 2, 3] {
+                let needs = (1u16 << k) & crate::fleet::NEEDS_IBIS != 0;
+                if b.has_equipment(k as usize) && (!needs || b.has_equipment(0)) {
+                    aspects.push(Aspect::Equip(b.plate.clone(), k));
+                }
+            }
+            for k in [1u8, 4, 5] {
+                if b.parts[k as usize] < 30.0 {
+                    aspects.push(Aspect::Worn(b.plate.clone(), k));
+                }
+            }
+            if !b.has_equipment(1) {
+                aspects.push(Aspect::Bare(b.plate.clone(), 1));
+            } else if !b.has_equipment(0) {
+                aspects.push(Aspect::Bare(b.plate.clone(), 0));
+            }
         }
         for l in &lines.0 {
             if l.fare > 2.5 || l.fare < 1.0 {
@@ -253,7 +283,8 @@ pub fn write_reviews(
             Aspect::Clean(_, c) => *c > 85.0,
             Aspect::Condition(_, c) => *c > 80.0,
             Aspect::Price(_, f) => *f < 1.0,
-            Aspect::Comfort(_) | Aspect::Shelter(_) => true,
+            Aspect::Comfort(_) | Aspect::Shelter(_) | Aspect::Equip(..) => true,
+            Aspect::Bare(..) | Aspect::Worn(..) => false,
         };
         let stars = if good {
             4 + (rev.rand() < 0.5) as u8

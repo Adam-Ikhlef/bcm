@@ -1267,8 +1267,11 @@ fn move_buses(
         let mut worn_out = false;
         if let Some(fb) = fleet.get_mut(bus.fleet) {
             if traveled > 0.0 || boarded_now > 0.0 {
-                fb.fuel = (fb.fuel - traveled * bus.fuel_per_m).max(0.0);
-                fb.condition = (fb.condition - traveled * bus.wear_per_m * cond.wear).max(0.0);
+                fb.fuel = (fb.fuel - traveled * bus.fuel_per_m * fb.parts_fuel_mult()).max(0.0);
+                fb.condition = (fb.condition
+                    - traveled * bus.wear_per_m * cond.wear * fb.parts_wear_mult())
+                .max(0.0);
+                fb.wear_parts(traveled / 1000.0, cond.wear);
                 fb.clean = (fb.clean - boarded_now * CLEAN_LOSS_PER_RIDER).max(0.0);
             }
             worn_out = fb.needs_service();

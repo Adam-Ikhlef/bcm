@@ -42,6 +42,8 @@ pub struct BuyState {
     pub pattern: u8,
     /// Depot new buses go to: 0 = main depot, k = external depot k.
     pub home: usize,
+    /// Equipment new buses come with (all of it unless unchecked).
+    pub equipment: u16,
 }
 
 impl Default for BuyState {
@@ -52,6 +54,7 @@ impl Default for BuyState {
             paint: 0,
             pattern: 0,
             home: 0,
+            equipment: crate::fleet::ALL_EQUIPMENT,
         }
     }
 }
@@ -587,6 +590,36 @@ fn new_buses(
             row.spawn(button(f, *n, Action::PatternPick(i as u8), kind));
         }
     });
+    // Equipment that new buses come with
+    p.spawn(text(
+        f,
+        true,
+        12.0,
+        style::MUTED,
+        "EQUIPMENT (new buses come with the checked items)",
+    ));
+    p.spawn(Node {
+        flex_wrap: FlexWrap::Wrap,
+        column_gap: Val::Px(4.0),
+        row_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|row| {
+        for (k, (name, price, _)) in crate::fleet::EQUIPMENT.iter().enumerate() {
+            let on = st.equipment & (1 << k) != 0;
+            let kind = if on { BtnKind::Primary } else { BtnKind::Small };
+            row.spawn(button(
+                f,
+                format!(
+                    "{} {name}  {}",
+                    if on { "[x]" } else { "[ ]" },
+                    fmt_money(*price)
+                ),
+                Action::NewEquip(k as u8),
+                kind,
+            ));
+        }
+    });
     // Categories
     p.spawn(Node {
         flex_wrap: FlexWrap::Wrap,
@@ -618,7 +651,7 @@ fn new_buses(
         };
         let h = thumbs.get(images, i, spec, rgb, pat);
         let tag = if spec.is_mod { " (mod)" } else { "" };
-        let total = spec.price * st.qty as f64;
+        let total = (spec.price + crate::fleet::equipment_price(st.equipment)) * st.qty as f64;
         p.spawn((
             Node {
                 align_items: AlignItems::Center,

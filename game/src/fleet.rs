@@ -547,6 +547,63 @@ pub struct FleetBus {
     pub upgrades: u8,
     /// Just came home: the 3D depot shows it driving in (not saved).
     pub arriving: bool,
+    /// Fitted equipment (bit mask, see `EQUIPMENT`).
+    pub equipment: u16,
+    /// Health 0..100 of each part in `PARTS`.
+    pub parts: [f32; 7],
+}
+
+/// Maintainable parts: (name, price to renew from 0% to 100%, % lost per km).
+pub const PARTS: [(&str, f64, f32); 7] = [
+    ("Tires", 400.0, 0.40),
+    ("Wipers", 60.0, 0.12),
+    ("Battery", 250.0, 0.15),
+    ("Engine", 1_200.0, 0.20),
+    ("Blinkers", 80.0, 0.08),
+    ("Lights", 120.0, 0.10),
+    ("Equipment", 300.0, 0.05),
+];
+pub const PART_TIRES: usize = 0;
+pub const PART_BATTERY: usize = 2;
+pub const PART_ENGINE: usize = 3;
+pub const PART_EQUIPMENT: usize = 6;
+
+/// Bus equipment: (name, price, what it does). Announcements and the info screen need the IBIS.
+pub const EQUIPMENT: [(&str, f64, &str); 7] = [
+    (
+        "IBIS",
+        1_200.0,
+        "Board computer: drives the destination sign, announcements and info screen",
+    ),
+    ("Ticket and card validator", 900.0, "+5% ticket income"),
+    ("Announcements", 400.0, "Needs IBIS. +1% riders"),
+    ("Info display screen", 700.0, "Needs IBIS. +1.5% riders"),
+    ("USB ports", 350.0, "+1% riders"),
+    ("Wi-Fi", 800.0, "+2% riders"),
+    ("CCTV", 600.0, "5% less wear (vandalism)"),
+];
+
+/// Equipment that needs the IBIS (bit 0).
+pub const NEEDS_IBIS: u16 = (1 << 2) | (1 << 3);
+pub const ALL_EQUIPMENT: u16 = (1 << EQUIPMENT.len()) - 1;
+
+/// Removes equipment whose IBIS is missing.
+pub fn normalize_equipment(mask: u16) -> u16 {
+    let mask = mask & ALL_EQUIPMENT;
+    if mask & 1 == 0 {
+        mask & !NEEDS_IBIS
+    } else {
+        mask
+    }
+}
+
+pub fn equipment_price(mask: u16) -> f64 {
+    EQUIPMENT
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| mask & (1 << k) != 0)
+        .map(|(_, e)| e.1)
+        .sum()
 }
 
 /// Bus upgrades: (name, price, what it does).
@@ -562,27 +619,93 @@ impl FleetBus {
     }
 
     pub fn fuel_mult(&self) -> f32 {
-        if self.has_upgrade(0) {
-            0.85
+        let base = if self.has_upgrade(0) { 0.85 } else { 1.0 };
+        base * self.parts_fuel_mult()
+    }
+
+    /// Drive `km` kilometres: every part wears (`wear` = mode and contract factor).
+    pub fn wear_parts(&mut self, km: f32, wear: f32) {
+        for (h, p) in self.parts.iter_mut().zip(PARTS.iter()) {
+            *h = (*h - km * p.2 * wear).max(0.0);
+        }
+    }
+
+    /// Worn tyres wear the whole bus faster.
+    pub fn parts_wear_mult(&self) -> f32 {
+        1.0 + (1.0 - self.parts[PART_TIRES] / 100.0) * 0.5
+    }
+
+    /// A tired engine and soft tyres burn more fuel.
+    pub fn parts_fuel_mult(&self) -> f32 {
+        1.0 + (1.0 - self.parts[PART_ENGINE] / 100.0) * 0.2
+            + (1.0 - self.parts[PART_TIRES] / 100.0) * 0.1
+    }
+
+    /// How well the fitted equipment works (worn-out gear does little).
+    pub fn equip_factor(&self) -> f32 {
+        let h = self.parts[PART_EQUIPMENT];
+        if h <= 5.0 {
+            0.0
+        } else if h < 30.0 {
+            0.5
         } else {
             1.0
         }
+    }
+
+    /// Cost to renew part `k` back to 100%.
+    pub fn part_cost(&self, k: usize) -> f64 {
+        (100.0 - self.parts[k]) as f64 / 100.0 * PARTS[k].1
+    }
+
+    /// Cost to renew every part.
+    pub fn parts_cost(&self) -> f64 {
+        (0..PARTS.len()).map(|k| self.part_cost(k)).sum()
+    }
+
+    pub fn has_equipment(&self, k: usize) -> bool {
+        self.equipment & (1 << k) != 0
     }
 
     pub fn wear_mult(&self) -> f32 {
-        if self.has_upgrade(1) {
-            0.75
+        let base = if self.has_upgrade(1) { 0.75 } else { 1.0 } * self.parts_wear_mult();
+        if self.has_equipment(6) {
+            base * 0.95
         } else {
-            1.0
+            base
         }
     }
 
-    pub fn fare_mult(&self) -> f64 {
-        if self.has_upgrade(2) {
-            1.10
-        } else {
-            1.0
+    /// Extra riders this bus attracts (a fraction).
+    pub fn rider_bonus(&self) -> f32 {
+        let ibis = self.has_equipment(0);
+        let mut b = 0.0;
+        if ibis && self.has_equipment(2) {
+            b += 0.01;
         }
+        if ibis && self.has_equipment(3) {
+            b += 0.015;
+        }
+        if self.has_equipment(4) {
+            b += 0.01;
+        }
+        if self.has_equipment(5) {
+            b += 0.02;
+        }
+        b * self.equip_factor()
+    }
+
+    /// The destination sign works only with an IBIS.
+    pub fn sign_works(&self) -> bool {
+        self.has_equipment(0) && self.equip_factor() > 0.0
+    }
+
+    pub fn fare_mult(&self) -> f64 {
+        let mut m = if self.has_upgrade(2) { 1.10 } else { 1.0 };
+        if self.has_equipment(1) {
+            m *= 1.0 + 0.05 * self.equip_factor() as f64;
+        }
+        m
     }
 
     /// Part of the upgrade prices that comes back when the bus is sold.
@@ -592,7 +715,8 @@ impl FleetBus {
             .enumerate()
             .filter(|(k, _)| self.has_upgrade(*k))
             .map(|(_, u)| u.1 * 0.4)
-            .sum()
+            .sum::<f64>()
+            + equipment_price(self.equipment) * 0.4
     }
 
     /// What the bus would sell for: worn buses are worth less.
@@ -601,7 +725,12 @@ impl FleetBus {
     }
 
     pub fn needs_service(&self) -> bool {
-        self.fuel <= 5.0 || self.condition <= 5.0 || self.clean <= 5.0
+        self.fuel <= 5.0
+            || self.condition <= 5.0
+            || self.clean <= 5.0
+            || self.parts[PART_TIRES] <= 5.0
+            || self.parts[PART_BATTERY] <= 5.0
+            || self.parts[PART_ENGINE] <= 5.0
     }
 
     /// Price of a full service. Fuel, repairs and washing each need their own room.
@@ -611,7 +740,7 @@ impl FleetBus {
             cost += (100.0 - self.fuel) as f64 * 0.5 * 0.6;
         }
         if fleet.has_room(Room::Workshop) {
-            cost += (100.0 - self.condition) as f64 * 2.0 * 0.5;
+            cost += (100.0 - self.condition) as f64 * 2.0 * 0.5 + self.parts_cost();
         }
         if fleet.has_room(Room::WashBay) {
             cost += (100.0 - self.clean) as f64 * 0.3 * 0.3;
@@ -811,6 +940,8 @@ impl Fleet {
             depart: None,
             upgrades: 0,
             arriving: false,
+            equipment: 0,
+            parts: [100.0; 7],
         });
         self.version += 1;
         Some(id)
@@ -914,6 +1045,8 @@ pub fn test_bus(id: u32) -> FleetBus {
         depart: None,
         upgrades: 0,
         arriving: false,
+        equipment: 0,
+        parts: [100.0; 7],
     }
 }
 
@@ -937,6 +1070,8 @@ mod tests {
             depart: None,
             upgrades: 0b111,
             arriving: false,
+            equipment: 0,
+            parts: [100.0; 7],
         };
         f.buses.push(b);
         let b = &f.buses[0];
@@ -1061,5 +1196,42 @@ mod tests {
         );
         f.park(a);
         assert_eq!(f.get(a).unwrap().bay, None);
+    }
+
+    #[test]
+    fn equipment_needs_ibis_and_changes_income_riders_and_wear() {
+        assert_eq!(normalize_equipment(ALL_EQUIPMENT & !1) & NEEDS_IBIS, 0);
+        assert_eq!(normalize_equipment(ALL_EQUIPMENT), ALL_EQUIPMENT);
+        let mut b = test_bus(1);
+        assert_eq!(
+            (b.fare_mult(), b.rider_bonus(), b.wear_mult()),
+            (1.0, 0.0, 1.0)
+        );
+        b.equipment = ALL_EQUIPMENT;
+        assert!(b.fare_mult() > 1.04 && b.rider_bonus() > 0.05 && b.wear_mult() < 1.0);
+        assert!(b.sign_works());
+        b.equipment = 1 << 2; // announcements without IBIS do nothing
+        assert_eq!(b.rider_bonus(), 0.0);
+        assert!(equipment_price(ALL_EQUIPMENT) > 4_000.0);
+        b.equipment = ALL_EQUIPMENT;
+        assert!(b.upgrade_value() >= equipment_price(ALL_EQUIPMENT) * 0.4);
+    }
+
+    #[test]
+    fn parts_wear_cost_and_limp_mode() {
+        let mut b = test_bus(1);
+        assert_eq!(b.parts_cost(), 0.0);
+        assert_eq!((b.parts_wear_mult(), b.parts_fuel_mult()), (1.0, 1.0));
+        b.wear_parts(100.0, 1.0);
+        assert!(b.parts.iter().all(|h| *h < 100.0));
+        assert!(b.parts_wear_mult() > 1.0 && b.parts_fuel_mult() > 1.0 && b.parts_cost() > 0.0);
+        b.parts[PART_ENGINE] = 0.0;
+        assert!(b.needs_service());
+        b.parts = [100.0; 7];
+        b.parts[PART_EQUIPMENT] = 10.0;
+        b.equipment = ALL_EQUIPMENT;
+        assert_eq!(b.equip_factor(), 0.5);
+        b.parts[PART_EQUIPMENT] = 0.0;
+        assert!(!b.sign_works() && b.rider_bonus() == 0.0);
     }
 }

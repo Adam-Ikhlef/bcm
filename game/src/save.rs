@@ -151,6 +151,14 @@ struct BusSave {
     home: usize,
     #[serde(default)]
     upgrades: u8,
+    #[serde(default)]
+    equipment: u16,
+    #[serde(default = "full_parts")]
+    parts: [f32; 7],
+}
+
+fn full_parts() -> [f32; 7] {
+    [100.0; 7]
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -353,6 +361,8 @@ pub fn collect(world: &World) -> Option<SaveData> {
             .map(|b| BusSave {
                 home: b.home,
                 upgrades: b.upgrades,
+                equipment: b.equipment,
+                parts: b.parts,
                 plate: b.plate.clone(),
                 spec: catalog
                     .0
@@ -545,6 +555,8 @@ pub fn apply_pending_load(world: &mut World) {
             fb.condition = b.condition;
             fb.clean = b.clean;
             fb.upgrades = b.upgrades & 0b111;
+            fb.equipment = crate::fleet::normalize_equipment(b.equipment);
+            fb.parts = b.parts.map(|h| h.clamp(0.0, 100.0));
             fb.paint = b.paint.map(|(r, g, bl, pattern)| crate::fleet::Paint {
                 rgb: (r, g, bl),
                 pattern,

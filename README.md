@@ -229,8 +229,8 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Real-GPU checks on Windows / macOS (graphics API fallback, night look, shadows), full play-session balance of pace and passenger rate
 - [ ] Signed installers (Windows code signing, macOS notarisation)
 - [ ] Fully customizable 3D bus paint (paint areas, external textures)
-- [ ] Bus equipment upgrades (IBIS, ticket and card validator, announcements, info display, USB, Wi-Fi...); new buses come with them unless unchecked
-- [ ] Bus maintenance (tires, wipers, battery, engine, lights, equipment)
+- [x] Bus equipment upgrades (IBIS, ticket and card validator, announcements, info display, USB, Wi-Fi...); new buses come with them unless unchecked
+- [x] Bus maintenance (tires, wipers, battery, engine, lights, equipment)
 - [ ] Ticket inspectors (appear in buses on the map)
 - [x] Bigger 3D depot (4x lot, 26x20 cells): buses leave along roads to the edge of the scene and come back in, reversing into their bay; buses wait behind each other. Existing stands keep their place (lot expansion now 18 / 22 / 26 columns)
 - [x] Working destination displays on 3D depot buses (LED dot-matrix: line number + last stop, "NO SERVICE" when unassigned)
