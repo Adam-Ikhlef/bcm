@@ -93,7 +93,7 @@ pub fn daily_rollover(
     };
     let wages =
         staff.daily_wages() * session.mode.wage_factor() * break_room * research.wage_mult();
-    let monthly = if (day + 1) % 30 == 0 {
+    let monthly = if (day + 1).is_multiple_of(30) {
         stations.monthly_cost() + ext.monthly_cost()
     } else {
         0.0
@@ -315,6 +315,8 @@ pub fn dispatch_trips(
     mut buses: Query<&mut Bus>,
     depot: Res<DepotSite>,
     ext: Res<crate::extdepot::ExtDepots>,
+    roster: Res<crate::roster::Roster>,
+    catalog: Res<crate::fleet::Catalog>,
 ) {
     let now = clock.abs;
     for (li, line) in lines.0.iter().enumerate() {
@@ -339,7 +341,10 @@ pub fn dispatch_trips(
                 for mut b in buses.iter_mut() {
                     let shift_ok = staff
                         .get(b.driver)
-                        .is_some_and(|dr| dr.shift.contains(minute));
+                        .is_some_and(|dr| dr.shift.contains(minute))
+                        && fleet
+                            .get(b.fleet)
+                            .is_none_or(|fb| roster.shift_ok(fb, minute));
                     if b.line == li && b.phase == Phase::Layover && !b.retire && shift_ok {
                         b.phase = Phase::Wait;
                         b.wait_until = d;
@@ -367,10 +372,9 @@ pub fn dispatch_trips(
             if layover_soon && now < d - CLAIM_MIN {
                 continue;
             }
-            let bus_id = fleet.ready_for(li);
-            let driver_id = staff.free_on_shift(minute);
-            match (bus_id, driver_id) {
-                (Some(bid), Some(did)) => {
+            let picked = crate::roster::pick(&fleet, &staff, &roster, &catalog, li, minute);
+            match picked {
+                crate::roster::Pick::Found(bid, did) => {
                     let Some(b) = fleet.get(bid) else { continue };
                     let total = match b.bay {
                         Some(bay) => depot::exit_length(bay, &fleet) / EXIT_SPEED,
@@ -404,12 +408,14 @@ pub fn dispatch_trips(
                     trips.served_total += 1;
                     trips.version += 1;
                 }
-                _ => {
+                other => {
                     if now > d + LATE_LIMIT_MIN {
-                        let reason = if bus_id.is_none() {
-                            "no bus ready"
-                        } else {
-                            "no driver on shift"
+                        let reason = match other {
+                            crate::roster::Pick::NoBus => "no bus ready",
+                            crate::roster::Pick::NotAllowed => {
+                                "no bus allowed on this shift or group"
+                            }
+                            _ => "no driver on shift",
                         };
                         trips.done.insert(key, Outcome::Missed(reason));
                         trips.missed_total += 1;

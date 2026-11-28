@@ -205,7 +205,7 @@ pub fn write_reviews(
             w(a).total_cmp(&w(b))
         }) {
             let r = queues.waiting.get(i).copied().unwrap_or(0.0) / up.cap(i);
-            if r > 0.55 || r < 0.12 {
+            if !(0.12..=0.55).contains(&r) {
                 aspects.push(Aspect::Crowd(i, r));
             }
             if up.level(i) > 0 {

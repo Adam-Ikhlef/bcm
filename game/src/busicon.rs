@@ -123,7 +123,7 @@ pub fn start_jobs(
             | TextureUsages::COPY_DST
             | TextureUsages::RENDER_ATTACHMENT;
         img.sampler = bevy::image::ImageSampler::linear();
-        let _ = images.insert(r.id, img);
+        images.insert(r.id, img);
 
         *slot += 1;
         let origin = Vec3::new(40_000.0 + *slot as f32 * 60.0, 0.0, 40_000.0);

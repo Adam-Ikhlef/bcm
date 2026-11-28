@@ -1,9 +1,16 @@
 ; Inno Setup script for the Windows installer.
-; Built by GitHub Actions:  iscc /DAppVersion=0.4.0 installer\windows\busmanager.iss
-; Expects target\release\busmanager.exe to exist (cargo build --release).
+; Built by GitHub Actions:  iscc /DAppVersion=0.4.0 /DArch=x64 /DTarget=x86_64-pc-windows-msvc installer\windows\busmanager.iss
+; Expects target\<Target>\release\busmanager.exe to exist (cargo build --release).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
+#endif
+; Arch is "x64" or "arm64"; Target is the Rust target the exe was built for.
+#ifndef Arch
+  #define Arch "x64"
+#endif
+#ifndef Target
+  #define Target "x86_64-pc-windows-msvc"
 #endif
 
 [Setup]
@@ -21,12 +28,17 @@ UninstallDisplayIcon={app}\busmanager.exe
 UninstallDisplayName=Bus Manager
 SetupIconFile=..\..\game\assets\icon.ico
 OutputDir=..\..\dist
-OutputBaseFilename=BusManager-Setup-windows
+OutputBaseFilename=BusManager-Setup-windows-{#Arch}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+#if Arch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 ; Per-user install by default (no admin prompt); the user may choose "all users".
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -40,7 +52,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "..\..\target\release\busmanager.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\{#Target}\release\busmanager.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

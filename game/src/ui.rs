@@ -103,6 +103,13 @@ pub enum Action {
     ToggleStation,
     ToggleStations,
     ToggleCompany,
+    ToggleTimetable,
+    TtTab(u8),
+    TtPage(i8),
+    DepotShift(u8, u8),
+    BusShift(u32, u8),
+    BusDriver(u32),
+    LineGroup(u16, u8),
     ContractSign(u32),
     ContractNegotiate(u32),
     ContractDecline(u32),
@@ -333,7 +340,7 @@ pub fn group_digits(n: i64) -> String {
     let s = n.abs().to_string();
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);
@@ -429,6 +436,7 @@ pub struct NavIcons {
     pub lines: Handle<Image>,
     pub stops: Handle<Image>,
     pub depots: Handle<Image>,
+    pub timetable: Handle<Image>,
     pub menu: Handle<Image>,
     pub check: Handle<Image>,
     pub cross: Handle<Image>,
@@ -464,6 +472,7 @@ pub fn install_nav_icons(world: &mut World) {
         lines: load(include_bytes!("../assets/icons/lines.png")),
         stops: load(include_bytes!("../assets/icons/stops.png")),
         depots: load(include_bytes!("../assets/icons/depots.png")),
+        timetable: load(include_bytes!("../assets/icons/timetable.png")),
         menu: load(include_bytes!("../assets/icons/menu.png")),
         check: load(include_bytes!("../assets/icons/check.png")),
         cross: load(include_bytes!("../assets/icons/cross.png")),
@@ -508,14 +517,8 @@ fn nav_button(p: &mut ChildSpawnerCommands, icon: &Handle<Image>, color: Color, 
 }
 
 /// Whether the Lines panel is shown on the map.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct LinesOpen(pub bool);
-
-impl Default for LinesOpen {
-    fn default() -> Self {
-        Self(false)
-    }
-}
 
 /// Whether the Missions panel is expanded (it can be tucked away to the right).
 #[derive(Resource)]
@@ -548,7 +551,7 @@ pub fn panel_toggles(
         }
     }
     if *last != Some(*view) {
-        if *view == View::Map && *last != None {
+        if *view == View::Map && (*last).is_some() {
             lines.0 = false;
         }
         *last = Some(*view);
@@ -739,6 +742,12 @@ pub fn spawn_game_ui(
                 &icons.staff,
                 style::CBM_ORANGE,
                 Action::SetView(View::Staff),
+            );
+            nav_button(
+                p,
+                &icons.timetable,
+                style::rgb(0xc2, 0x4d, 0x6b),
+                Action::ToggleTimetable,
             );
             nav_button(p, &icons.lines, style::CBM_PURPLE, Action::ToggleLines);
             // Only while the big map is open
@@ -1284,6 +1293,7 @@ fn tip_for(a: Action, missions_open: bool) -> Option<&'static str> {
         Action::OpenPanel(1) => "Build in the depot",
         Action::ToggleLines => "Lines",
         Action::ToggleResearch => "Research",
+        Action::ToggleTimetable => "Timetable: shifts, drivers and bus groups",
         Action::ToggleStations => "All bus stations of the map",
         Action::ToggleCompany => "Your company: reputation and customer reviews",
         Action::ToggleStation => "Build a new station next to a road and add it to the line",

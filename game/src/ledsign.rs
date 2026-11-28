@@ -265,7 +265,7 @@ mod tests {
     fn letters_light_the_right_leds_and_stay_centred() {
         let g = leds("I");
         let lit: usize = g.iter().filter(|b| **b).count();
-        assert_eq!(lit, 3 + 5 * 1 + 3, "top bar, stem, bottom bar of an I");
+        assert_eq!(lit, 3 + 5 + 3, "top bar, stem, bottom bar of an I");
         assert!(g.iter().take(COLS).all(|b| !b), "margin row stays dark");
         let cols: Vec<usize> = (0..COLS).filter(|c| g[COLS + c]).collect();
         let mid = COLS as i32 / 2;

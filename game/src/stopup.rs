@@ -105,10 +105,22 @@ pub fn up_gizmos(
 
 /// Hover text: what the stop has.
 pub fn tooltip_line(up: &StopUpgrades, stop: usize) -> String {
-    let have = up
-        .describe(stop)
-        .unwrap_or_else(|| "No upgrades".to_string());
-    have
+    up.describe(stop)
+        .unwrap_or_else(|| "No upgrades".to_string())
+}
+
+/// Buys the next level of a stop. Returns a message for the player.
+pub fn buy_next(up: &mut StopUpgrades, eco: &mut Economy, stop: usize, name: &str) -> String {
+    let next = up.level(stop) as usize;
+    let Some(&(level, price, ..)) = LEVELS.get(next) else {
+        return "This stop is fully upgraded".to_string();
+    };
+    if eco.money < price {
+        return format!("{level} costs {}", fmt_money(price));
+    }
+    eco.money -= price;
+    up.levels.insert(stop, next as u8 + 1);
+    format!("{name} upgraded: {level}")
 }
 
 #[cfg(test)]
@@ -134,18 +146,4 @@ mod tests {
         assert_eq!(up.level(1), 2);
         assert_eq!(collect(&up), vec![(1, 2)]);
     }
-}
-
-/// Buys the next level of a stop. Returns a message for the player.
-pub fn buy_next(up: &mut StopUpgrades, eco: &mut Economy, stop: usize, name: &str) -> String {
-    let next = up.level(stop) as usize;
-    let Some(&(level, price, ..)) = LEVELS.get(next) else {
-        return "This stop is fully upgraded".to_string();
-    };
-    if eco.money < price {
-        return format!("{level} costs {}", fmt_money(price));
-    }
-    eco.money -= price;
-    up.levels.insert(stop, next as u8 + 1);
-    format!("{name} upgraded: {level}")
 }

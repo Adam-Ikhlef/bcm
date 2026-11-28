@@ -1,0 +1,32 @@
+name: PR test builds
+
+# Builds the game for all six systems for every pull request, so a change can be tried on a real
+# machine: open the run and download the artifact for your system (kept for 7 days).
+# Runs with read-only permissions and no secrets, so it is safe for pull requests from forks.
+
+on:
+  pull_request:
+    paths:
+      - "game/**"
+      - "installer/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/build-reusable.yml"
+      - ".github/workflows/pr-test-builds.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-test-builds-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-reusable.yml
+    with:
+      installers: false
+      publish: false
+      retention-days: 7

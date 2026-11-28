@@ -40,9 +40,17 @@ fn os_name() -> &'static str {
     }
 }
 
-fn asset_name() -> String {
+/// Release files for this system, best first: `busmanager-<os>-<arch>.<ext>`, then the old name
+/// (before there were several architectures: Windows and Linux were x64, macOS Apple silicon).
+fn asset_names() -> Vec<String> {
     let ext = if cfg!(windows) { "zip" } else { "tar.gz" };
-    format!("busmanager-{}.{ext}", os_name())
+    let arm = cfg!(target_arch = "aarch64");
+    let arch = if arm { "arm64" } else { "x64" };
+    let mut names = vec![format!("busmanager-{}-{arch}.{ext}", os_name())];
+    if arm == cfg!(target_os = "macos") {
+        names.push(format!("busmanager-{}.{ext}", os_name()));
+    }
+    names
 }
 
 // --- Paths ------------------------------------------------------------------
@@ -126,12 +134,21 @@ fn latest_release() -> Result<Release, String> {
         .into_json()
         .map_err(|e| e.to_string())?;
     let tag = v["tag_name"].as_str().ok_or("release has no version tag")?;
-    let want = asset_name();
+    let wanted = asset_names();
     let url = v["assets"]
         .as_array()
-        .and_then(|a| a.iter().find(|x| x["name"].as_str() == Some(want.as_str())))
+        .and_then(|a| {
+            wanted
+                .iter()
+                .find_map(|w| a.iter().find(|x| x["name"].as_str() == Some(w.as_str())))
+        })
         .and_then(|x| x["browser_download_url"].as_str())
-        .ok_or_else(|| format!("release {tag} has no download for this system ({want})"))?;
+        .ok_or_else(|| {
+            format!(
+                "release {tag} has no download for this system ({})",
+                wanted[0]
+            )
+        })?;
     Ok(Release {
         version: tag.trim_start_matches('v').to_string(),
         url: url.to_string(),
@@ -155,13 +172,17 @@ fn extract_game(archive: &[u8]) -> Result<Vec<u8>, String> {
         let mut zip = zip::ZipArchive::new(Cursor::new(archive)).map_err(|e| e.to_string())?;
         for i in 0..zip.len() {
             let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
-            let is_game = Path::new(f.name())
-                .file_name()
-                .map(|n| n == EXE)
+            let is_game = f
+                .name()
+                .map(|n| Path::new(n.as_ref()).file_name().is_some_and(|n| n == EXE))
                 .unwrap_or(false);
             if is_game {
                 let mut out = Vec::new();
-                f.read_to_end(&mut out).map_err(|e| e.to_string())?;
+                // Never read more than 1 GiB (a hostile archive cannot exhaust memory).
+                (&mut f)
+                    .take(1 << 30)
+                    .read_to_end(&mut out)
+                    .map_err(|e| e.to_string())?;
                 return Ok(out);
             }
         }

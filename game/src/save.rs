@@ -217,6 +217,8 @@ pub struct SaveData {
     #[serde(default)]
     reviews: crate::reviews::ReviewsSave,
     #[serde(default)]
+    roster: crate::roster::RosterSave,
+    #[serde(default)]
     contracts: crate::contracts::ContractsSave,
     /// Research in progress: (tech, finishing game minute).
     #[serde(default)]
@@ -380,6 +382,10 @@ pub fn collect(world: &World) -> Option<SaveData> {
                     .map(|o| (o.pos.x, o.pos.y, o.name.clone()))
                     .collect()
             })
+            .unwrap_or_default(),
+        roster: world
+            .get_resource::<crate::roster::Roster>()
+            .map(crate::roster::collect)
             .unwrap_or_default(),
         contracts: world
             .get_resource::<crate::contracts::Contracts>()
@@ -557,6 +563,7 @@ pub fn apply_pending_load(world: &mut World) {
     world.insert_resource(ext);
     world.insert_resource(crate::finance::restore(&data.finance));
     world.insert_resource(crate::reviews::restore(&data.reviews));
+    world.insert_resource(crate::roster::restore(&data.roster));
     world.insert_resource(crate::contracts::restore(&data.contracts));
     let stop_count = map.stops.len();
     world.insert_resource(crate::stopup::restore(&data.stop_upgrades, stop_count));

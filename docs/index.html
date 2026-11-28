@@ -63,7 +63,9 @@ section .sub{color:var(--muted);margin:0 0 36px;max-width:720px}
 @media (max-width:760px){nav a:not(:last-child){display:none}.shot,.shot:nth-child(even){grid-template-columns:1fr}.shot:nth-child(even) img{order:0}nav a{margin-left:14px}}
 .dl{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
 .dl .card{text-align:center}
-.dl .btn{margin-top:14px;width:100%;justify-content:center}
+.dl .btn{margin-top:10px;width:100%;justify-content:center}
+.dl .btn.alt{background:transparent;border-color:var(--green);color:var(--green)}
+.dl .btn.alt:hover{background:rgba(31,157,85,.12)}
 .dl small{display:block;color:var(--muted);margin-top:10px}
 .dl .card.me{border-color:var(--green);box-shadow:0 0 0 3px rgba(31,157,85,.22),var(--shadow)}
 .road{list-style:none;margin:0;padding:0;display:grid;gap:10px}
@@ -132,9 +134,18 @@ footer a{color:inherit}
   <h2>Download</h2>
   <p class="sub">The installer can install, update, repair and uninstall the game. Once installed, the game also updates itself from its own menu.</p>
   <div class="dl">
-    <div class="card" data-os="windows"><h3>Windows</h3><p>Windows 10 and newer</p><a class="btn primary" href="https://github.com/YOZTeam/BusManager/releases/latest">Get the installer</a><small>BusManager-Setup-windows.exe</small></div>
-    <div class="card" data-os="macos"><h3>macOS</h3><p>Apple silicon and Intel</p><a class="btn primary" href="https://github.com/YOZTeam/BusManager/releases/latest">Get the installer</a><small>BusManager-Setup-macos</small></div>
-    <div class="card" data-os="linux"><h3>Linux</h3><p>Ubuntu and other distributions</p><a class="btn primary" href="https://github.com/YOZTeam/BusManager/releases/latest">Get the installer</a><small>BusManager-Setup-linux</small></div>
+    <div class="card" data-os="windows"><h3>Windows</h3><p>Windows 10 and newer</p>
+      <a class="btn primary" data-arch="x64" href="https://github.com/YOZTeam/BusManager/releases/latest">Windows x64</a>
+      <a class="btn alt" data-arch="arm64" href="https://github.com/YOZTeam/BusManager/releases/latest">Windows ARM64</a>
+      <small>BusManager-Setup-windows-x64.exe / -arm64.exe</small></div>
+    <div class="card" data-os="macos"><h3>macOS</h3><p>macOS 11 and newer</p>
+      <a class="btn primary" data-arch="arm64" href="https://github.com/YOZTeam/BusManager/releases/latest">Apple silicon</a>
+      <a class="btn alt" data-arch="x64" href="https://github.com/YOZTeam/BusManager/releases/latest">Intel</a>
+      <small>BusManager-Setup-macos-arm64 / -x64</small></div>
+    <div class="card" data-os="linux"><h3>Linux</h3><p>Ubuntu and other distributions</p>
+      <a class="btn primary" data-arch="x64" href="https://github.com/YOZTeam/BusManager/releases/latest">Linux x64</a>
+      <a class="btn alt" data-arch="arm64" href="https://github.com/YOZTeam/BusManager/releases/latest">Linux ARM64</a>
+      <small>BusManager-Setup-linux-x64 / -arm64</small></div>
   </div>
   <p class="sub" style="margin-top:22px">Want to build it yourself? <code>cargo run --release -p busmanager</code>. See the <a href="https://github.com/YOZTeam/BusManager#readme">README</a>.</p>
 </div></section>
@@ -185,12 +196,14 @@ footer a{color:inherit}
       var rel = list && list[0]; if(!rel) return;
       document.getElementById("ver").textContent = "Latest version: " + rel.tag_name;
       (rel.assets||[]).forEach(function(a){
-        Object.keys(names).forEach(function(k){
-          var card = document.querySelector('[data-os="'+k+'"]');
-          if (card && a.name.indexOf("BusManager-Setup-"+k) === 0) card.querySelector("a.btn").href = a.browser_download_url;
+        document.querySelectorAll(".dl .card").forEach(function(card){
+          card.querySelectorAll("a.btn").forEach(function(btn){
+            var want = "BusManager-Setup-" + card.getAttribute("data-os") + "-" + btn.getAttribute("data-arch");
+            if (a.name === want || a.name === want + ".exe") btn.href = a.browser_download_url;
+          });
         });
       });
-      var m = document.querySelector('[data-os="'+os+'"] a.btn');
+      var m = document.querySelector('[data-os="'+os+'"] a.btn.primary');
       if (m) document.getElementById("hero-dl").href = m.href;
     }).catch(function(){});
 })();

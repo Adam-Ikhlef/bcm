@@ -1,105 +1,24 @@
 name: Build
 
+# Builds for Windows (x64, ARM64), macOS (Apple silicon, Intel) and Linux (x64, ARM64).
+# Pushes to main keep the files as workflow artifacts; a version tag (v1.2.3) also attaches them to
+# the GitHub Release. Pull requests are built by "PR test builds".
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
-  contents: write
-
-env:
-  # The installer downloads releases from this repository.
-  BUSMANAGER_REPO: ${{ github.repository }}
+  contents: read
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: linux
-          - os: windows-latest
-            name: windows
-          - os: macos-latest
-            name: macos
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build game and installer
-        run: cargo build --release --workspace
-
-      - name: Package (Linux / macOS)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p dist/pack
-          cp target/release/busmanager dist/pack/
-          tar -czf dist/busmanager-${{ matrix.name }}.tar.gz -C dist/pack busmanager
-          cp target/release/busmanager-installer dist/BusManager-Setup-${{ matrix.name }}
-
-      - name: macOS app bundle (with icon)
-        if: runner.os == 'macOS'
-        run: |
-          APP=dist/BusManager.app
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp target/release/busmanager "$APP/Contents/MacOS/BusManager"
-          cp installer/assets/icon.icns "$APP/Contents/Resources/icon.icns"
-          VERSION=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          cat > "$APP/Contents/Info.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-          <key>CFBundleName</key><string>Bus Manager</string>
-          <key>CFBundleDisplayName</key><string>Bus Manager</string>
-          <key>CFBundleExecutable</key><string>BusManager</string>
-          <key>CFBundleIconFile</key><string>icon</string>
-          <key>CFBundleIdentifier</key><string>com.busmanager.game</string>
-          <key>CFBundleVersion</key><string>$VERSION</string>
-          <key>CFBundleShortVersionString</key><string>$VERSION</string>
-          <key>CFBundlePackageType</key><string>APPL</string>
-          <key>NSHighResolutionCapable</key><true/>
-          </dict></plist>
-          PLIST
-          chmod +x "$APP/Contents/MacOS/BusManager"
-          (cd dist && zip -qr BusManager-macos-app.zip BusManager.app)
-          rm -rf "$APP"
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path target/release/busmanager.exe -DestinationPath dist/busmanager-windows.zip
-
-      - name: Windows installer (Inno Setup)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install innosetup --no-progress -y
-          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\windows\busmanager.iss
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: busmanager-${{ matrix.name }}
-          path: dist/*
-
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
+    # Only this job may write to releases.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-reusable.yml
+    with:
+      installers: true
+      publish: ${{ startsWith(github.ref, 'refs/tags/v') }}

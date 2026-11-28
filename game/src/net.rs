@@ -19,7 +19,11 @@ use crate::osm::{self, MapData};
 const OVERPASS_SERVERS: &[&str] = &[
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
+/// How many times the whole list of servers is tried (with a pause between rounds).
+const ROUNDS: usize = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Place {
@@ -39,7 +43,8 @@ fn cache_dir() -> PathBuf {
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .user_agent("busmanager/0.2 (open-source hobby game)")
-        .timeout(Duration::from_secs(300))
+        .timeout_connect(Duration::from_secs(15))
+        .timeout(Duration::from_secs(600))
         .build()
 }
 
@@ -277,20 +282,54 @@ fn http_error(url: &str, e: ureq::Error) -> String {
 }
 
 fn post_query(query: &str, dest: &std::path::Path) -> Result<(), String> {
-    let mut last_err = String::from("no Overpass server configured");
-    for url in OVERPASS_SERVERS {
-        match agent().post(url).send_form(&[("data", query)]) {
-            Ok(resp) => {
-                let tmp = dest.with_extension("part");
-                let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
-                copy_counting(resp, &mut f).map_err(|e| e.to_string())?;
-                fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
-                return Ok(());
+    let mut errors: Vec<String> = Vec::new();
+    for round in 0..ROUNDS {
+        if round > 0 {
+            // Public servers are often busy for a moment: wait and go through them again.
+            std::thread::sleep(Duration::from_secs(4 * round as u64));
+        }
+        for url in OVERPASS_SERVERS {
+            match agent().post(url).send_form(&[("data", query)]) {
+                Ok(resp) => {
+                    let tmp = dest.with_extension("part");
+                    let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
+                    match copy_counting(resp, &mut f) {
+                        Ok(()) => {
+                            fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
+                            return Ok(());
+                        }
+                        Err(e) => errors.push(format!("{url}: {e}")),
+                    }
+                }
+                Err(e) => errors.push(http_error(url, e)),
             }
-            Err(e) => last_err = http_error(url, e),
         }
     }
-    Err(last_err)
+    Err(summarize_errors(&errors))
+}
+
+/// One line per server (the last answer of each), so the player sees what every server said.
+fn summarize_errors(errors: &[String]) -> String {
+    let mut last: Vec<(&str, &str)> = Vec::new();
+    for e in errors {
+        let (url, msg) = e.split_once(": ").unwrap_or(("", e));
+        match last.iter_mut().find(|(u, _)| *u == url) {
+            Some(slot) => slot.1 = msg,
+            None => last.push((url, msg)),
+        }
+    }
+    let list: Vec<String> = last
+        .iter()
+        .map(|(u, m)| {
+            let host = u.split('/').nth(2).unwrap_or(u);
+            let m: String = m.chars().take(140).collect();
+            format!("{host}: {m}")
+        })
+        .collect();
+    format!(
+        "No map server answered after {ROUNDS} tries. {}",
+        list.join(" | ")
+    )
 }
 
 fn load_tile_file(
@@ -344,20 +383,7 @@ fn tile_or_empty(r: Result<MapData, String>) -> Result<Option<MapData>, String> 
 
 fn fetch(place: &Place, dest: &std::path::Path) -> Result<(), String> {
     let query = overpass_query(place.osm_id + 3_600_000_000);
-    let mut last_err = String::from("no Overpass server configured");
-    for url in OVERPASS_SERVERS {
-        match agent().post(url).send_form(&[("data", query.as_str())]) {
-            Ok(resp) => {
-                let tmp = dest.with_extension("part");
-                let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
-                copy_counting(resp, &mut f).map_err(|e| e.to_string())?;
-                fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
-                return Ok(());
-            }
-            Err(e) => last_err = http_error(url, e),
-        }
-    }
-    Err(last_err)
+    post_query(&query, dest)
 }
 
 /// Download (or load from cache) a city and build the game map.
@@ -589,6 +615,18 @@ mod tests {
         assert_eq!(b.roads.len(), 1);
         let all = osm::load_overpass(json.as_bytes()).unwrap();
         assert_eq!(all.roads.len(), 2);
+    }
+
+    #[test]
+    fn server_errors_are_summarised_once_per_server() {
+        let errs = vec![
+            "https://a.example/api: HTTP 429 busy".to_string(),
+            "https://b.example/api: timed out".to_string(),
+            "https://a.example/api: HTTP 504 gateway".to_string(),
+        ];
+        let s = summarize_errors(&errs);
+        assert!(s.contains("a.example: HTTP 504 gateway") && s.contains("b.example: timed out"));
+        assert!(!s.contains("429"));
     }
 
     #[test]

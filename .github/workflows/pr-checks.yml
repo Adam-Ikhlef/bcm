@@ -1,0 +1,109 @@
+name: PR checks
+
+# Quality gate for pull requests: formatting, clippy, tests and a few project rules.
+# Read-only; findings are shown in the check's log and summary.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rules:
+    name: Project rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const problems = [];
+            const notes = [];
+
+            // 1. Text must be English (same rule as for issues).
+            const text = `${pr.title}\n${pr.body || ''}`
+              .replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/https?:\/\/\S+/g, ' ');
+            const letters = text.match(/\p{L}/gu) || [];
+            const latin = text.match(/\p{Script=Latin}/gu) || [];
+            if (letters.length >= 12 && 1 - latin.length / letters.length >= 0.3) {
+              problems.push('The title and description must be written in English.');
+            }
+
+            // 2. A real title and a filled-in description.
+            if (pr.title.trim().length < 8) problems.push('The title is too short: say what the change does.');
+            const body = (pr.body || '').replace(/<!--[\s\S]*?-->/g, '').replace(/^#+ .*$/gm, '').replace(/- \[[ xX]\].*$/gm, '').trim();
+            if (body.length < 20) problems.push('The description is empty. Please answer "What does this change?".');
+
+            // 3. The two policy items of the template must be ticked.
+            const raw = pr.body || '';
+            for (const key of ['Everything (code comments', 'No copyrighted assets']) {
+              const line = raw.split('\n').find(l => l.includes(key));
+              if (line && !/\[[xX]\]/.test(line)) problems.push(`Please tick the checklist item: "${key}...".`);
+            }
+
+            // 4. No binaries or build output in the diff.
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number, per_page: 100,
+            });
+            const banned = /\.(exe|dll|so|dylib|msi|dmg|pkg|zip|7z|rar|jar|apk)$/i;
+            for (const f of files) {
+              if (f.status !== 'removed' && banned.test(f.filename)) problems.push(`Binary or archive file not allowed: ${f.filename}`);
+              if (/^target\//.test(f.filename)) problems.push(`Build output must not be committed: ${f.filename}`);
+              if (f.status !== 'removed' && /(^|\/)(\.env|id_rsa|.*\.pem|.*\.key)$/i.test(f.filename)) problems.push(`Looks like a secret: ${f.filename}`);
+            }
+            if (files.some(f => f.filename.startsWith('.github/'))) notes.push('This pull request changes `.github/` (workflows or settings): a maintainer will review it with extra care.');
+
+            const lines = [...problems.map(p => `- ❌ ${p}`), ...notes.map(n => `- ℹ️ ${n}`)];
+            await core.summary.addHeading('Project rules').addRaw(lines.join('\n') || 'All rules are met.', true).write();
+            for (const p of problems) core.error(p);
+            if (problems.length) core.setFailed(`${problems.length} problem(s) found. See the summary.`);
+
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Linux system libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Linux system libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace

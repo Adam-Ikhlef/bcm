@@ -397,7 +397,7 @@ pub fn contract_tick(
     con.inbox.retain(|o| o.expires > day);
 
     // The market of suppliers is refreshed every 15 days
-    if day % 15 == 0 {
+    if day.is_multiple_of(15) {
         let keep = con.mission.map(|m| m.0);
         con.market.retain(|o| Some(o.id) == keep);
         for &k in &Kind::SUPPLY {
@@ -433,7 +433,7 @@ pub fn contract_tick(
     }
 
     // Pay day (every 30th game day, with the other monthly costs)
-    if (day + 1) % 30 == 0 && !con.active.is_empty() {
+    if (day + 1).is_multiple_of(30) && !con.active.is_empty() {
         let (earn, _) = con.monthly(&ctx);
         let discount = con.electricity() as f64 * overhead;
         let mut pay = 0.0;

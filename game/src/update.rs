@@ -101,8 +101,9 @@ struct GhAsset {
     digest: Option<String>,
 }
 
-/// Name of the release file that holds the game for this system.
-pub fn asset_name() -> String {
+/// Names of the release files that hold the game for this system, best first:
+/// `busmanager-<os>-<arch>.<ext>`, then the name used before there were several architectures.
+pub fn asset_names() -> Vec<String> {
     let (os, ext) = if cfg!(windows) {
         ("windows", "zip")
     } else if cfg!(target_os = "macos") {
@@ -110,7 +111,14 @@ pub fn asset_name() -> String {
     } else {
         ("linux", "tar.gz")
     };
-    format!("busmanager-{os}.{ext}")
+    let arm = cfg!(target_arch = "aarch64");
+    let arch = if arm { "arm64" } else { "x64" };
+    let mut names = vec![format!("busmanager-{os}-{arch}.{ext}")];
+    // Old releases: Windows and Linux were x64, macOS was Apple silicon.
+    if arm == (os == "macos") {
+        names.push(format!("busmanager-{os}.{ext}"));
+    }
+    names
 }
 
 /// "v1.2.3-beta" -> [1, 2, 3]
@@ -175,8 +183,11 @@ fn fetch() -> Option<Release> {
     if !is_newer(&best.tag_name, crate::VERSION) {
         return None;
     }
-    let want = asset_name();
-    let asset = best.assets.iter().find(|a| a.name == want).map(|a| Asset {
+    let wanted = asset_names();
+    let found = wanted
+        .iter()
+        .find_map(|w| best.assets.iter().find(|a| &a.name == w));
+    let asset = found.map(|a| Asset {
         version: best.tag_name.trim_start_matches(['v', 'V']).to_string(),
         url: a.browser_download_url.clone(),
         sha256: a
@@ -421,6 +432,9 @@ fn trusted_asset_url(url: &str) -> bool {
         || url.starts_with("http://127.0.0.1")
 }
 
+/// Largest game executable we accept from a download (1 GiB).
+const MAX_GAME_BYTES: u64 = 1 << 30;
+
 fn extract_game(archive: &[u8]) -> Result<Vec<u8>, String> {
     let exe_name = if cfg!(windows) {
         "busmanager.exe"
@@ -433,11 +447,18 @@ fn extract_game(archive: &[u8]) -> Result<Vec<u8>, String> {
             zip::ZipArchive::new(std::io::Cursor::new(archive)).map_err(|e| e.to_string())?;
         for i in 0..zip.len() {
             let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
-            if std::path::Path::new(f.name())
-                .file_name()
-                .is_some_and(|n| n == exe_name)
-            {
-                std::io::Read::read_to_end(&mut f, &mut out).map_err(|e| e.to_string())?;
+            let is_game = f.name().is_ok_and(|n| {
+                std::path::Path::new(n.as_ref())
+                    .file_name()
+                    .is_some_and(|n| n == exe_name)
+            });
+            if is_game {
+                // Never read more than MAX_GAME_BYTES (a hostile archive cannot exhaust memory).
+                std::io::Read::read_to_end(
+                    &mut std::io::Read::take(&mut f, MAX_GAME_BYTES),
+                    &mut out,
+                )
+                .map_err(|e| e.to_string())?;
                 return Ok(out);
             }
         }
@@ -616,6 +637,15 @@ mod tests {
         assert!(!trusted_asset_url(
             "https://github.com/someone/else/releases/download/v1/x"
         ));
+    }
+
+    #[test]
+    fn asset_names_say_system_and_architecture() {
+        let n = asset_names();
+        assert!(
+            n[0].starts_with("busmanager-") && (n[0].contains("-x64.") || n[0].contains("-arm64."))
+        );
+        assert!(n.len() <= 2);
     }
 
     #[test]

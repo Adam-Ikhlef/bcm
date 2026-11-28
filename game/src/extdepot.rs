@@ -228,12 +228,10 @@ pub fn ext_actions(
                     ext.version += 1;
                 }
             }
-            Action::Cancel => {
-                if ext.placing || ext.renaming.is_some() {
-                    ext.placing = false;
-                    ext.renaming = None;
-                    ext.version += 1;
-                }
+            Action::Cancel if (ext.placing || ext.renaming.is_some()) => {
+                ext.placing = false;
+                ext.renaming = None;
+                ext.version += 1;
             }
             _ => {}
         }

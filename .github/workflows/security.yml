@@ -1,5 +1,9 @@
 name: Security
 
+# Code scanning (CodeQL for Rust and GitHub Actions) runs from GitHub's "default setup"
+# (Settings > Advanced Security > Code scanning), so it is not repeated here: an advanced CodeQL
+# workflow cannot upload results while the default setup is on.
+
 on:
   push:
     branches: [main]
@@ -22,6 +26,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -30,28 +36,12 @@ jobs:
     name: Dependency review (pull requests)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
-
-  codeql:
-    name: CodeQL (${{ matrix.language }})
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [rust, actions]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: none
-      - uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:${{ matrix.language }}"

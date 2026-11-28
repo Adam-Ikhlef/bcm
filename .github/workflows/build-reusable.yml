@@ -1,0 +1,133 @@
+name: Build (reusable)
+
+# Builds the game for every supported system. Used by "Build" (main and releases) and by
+# "PR test builds". It does not set its own permissions: the calling workflow decides.
+
+on:
+  workflow_call:
+    inputs:
+      installers:
+        description: "Also build the installer and the Windows/macOS packages"
+        type: boolean
+        default: true
+      publish:
+        description: "Attach the files to the GitHub Release of the tag"
+        type: boolean
+        default: false
+      retention-days:
+        type: number
+        default: 30
+
+env:
+  CARGO_TERM_COLOR: always
+  # The installer downloads releases from this repository.
+  BUSMANAGER_REPO: ${{ github.repository }}
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: "Windows x64",         runner: windows-latest,   os: windows, arch: x64,   target: x86_64-pc-windows-msvc }
+          - { label: "Windows ARM64",       runner: windows-latest,   os: windows, arch: arm64, target: aarch64-pc-windows-msvc }
+          - { label: "macOS (Apple silicon)", runner: macos-latest,   os: macos,   arch: arm64, target: aarch64-apple-darwin }
+          - { label: "macOS (Intel)",       runner: macos-latest,     os: macos,   arch: x64,   target: x86_64-apple-darwin }
+          - { label: "Linux x64",           runner: ubuntu-latest,    os: linux,   arch: x64,   target: x86_64-unknown-linux-gnu }
+          - { label: "Linux ARM64",         runner: ubuntu-24.04-arm, os: linux,   arch: arm64, target: aarch64-unknown-linux-gnu }
+    runs-on: ${{ matrix.runner }}
+    env:
+      NAME: ${{ matrix.os }}-${{ matrix.arch }}
+      OUT: target/${{ matrix.target }}/release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build game
+        if: ${{ !inputs.installers }}
+        run: cargo build --release --target ${{ matrix.target }} -p busmanager
+
+      - name: Build game and installer
+        if: ${{ inputs.installers }}
+        run: cargo build --release --target ${{ matrix.target }} --workspace
+
+      - name: Package (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist/pack
+          cp "$OUT/busmanager" dist/pack/
+          tar -czf "dist/busmanager-$NAME.tar.gz" -C dist/pack busmanager
+          if [ "${{ inputs.installers }}" = "true" ]; then
+            cp "$OUT/busmanager-installer" "dist/BusManager-Setup-$NAME"
+          fi
+
+      - name: macOS app bundle (with icon)
+        if: runner.os == 'macOS' && inputs.installers
+        run: |
+          APP=dist/BusManager.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp "$OUT/busmanager" "$APP/Contents/MacOS/BusManager"
+          cp installer/assets/icon.icns "$APP/Contents/Resources/icon.icns"
+          VERSION=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleName</key><string>Bus Manager</string>
+          <key>CFBundleDisplayName</key><string>Bus Manager</string>
+          <key>CFBundleExecutable</key><string>BusManager</string>
+          <key>CFBundleIconFile</key><string>icon</string>
+          <key>CFBundleIdentifier</key><string>com.busmanager.game</string>
+          <key>CFBundleVersion</key><string>$VERSION</string>
+          <key>CFBundleShortVersionString</key><string>$VERSION</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          chmod +x "$APP/Contents/MacOS/BusManager"
+          (cd dist && zip -qr "BusManager-$NAME-app.zip" BusManager.app)
+          rm -rf "$APP"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$env:OUT/busmanager.exe" -DestinationPath "dist/busmanager-$env:NAME.zip"
+
+      - name: Windows installer (Inno Setup)
+        if: runner.os == 'Windows' && inputs.installers
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" "/DArch=${{ matrix.arch }}" "/DTarget=${{ matrix.target }}" installer\windows\busmanager.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: busmanager-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          retention-days: ${{ inputs.retention-days }}
+
+      - name: Attach to GitHub Release
+        if: inputs.publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

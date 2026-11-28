@@ -240,12 +240,12 @@ pub fn fin_daily(
     }
     if day > fin.last_day {
         fin.last_day = day;
-        if (day + 1) % 30 == 0 {
+        if (day + 1).is_multiple_of(30) {
             let up = upgrades.monthly_cost();
             eco.money -= up;
             eco.costs += up;
         }
-        if (day + 1) % 30 == 0 && !fin.loans.is_empty() {
+        if (day + 1).is_multiple_of(30) && !fin.loans.is_empty() {
             let mut total = 0.0;
             let mut interest = 0.0;
             for l in fin.loans.iter_mut() {
@@ -1029,7 +1029,7 @@ mod tests {
                 balance: 100.0 + h as f64,
             });
         }
-        let (hours, _, ..) = fin.series(false);
+        let (hours, ..) = fin.series(false);
         assert_eq!(hours.len(), 24);
         assert!((hours[0] - 6.0).abs() < 1e-9);
         let (days, bal, first, last) = fin.series(true);

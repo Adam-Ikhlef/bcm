@@ -901,7 +901,7 @@ fn build(
                 if let Some(cell) = grid.get(&(cx + dx, cy + dy)) {
                     density += cell.len();
                     for &(i, p) in cell {
-                        if best.map_or(true, |(_, bp)| {
+                        if best.is_none_or(|(_, bp)| {
                             p.distance_squared(pos) < bp.distance_squared(pos)
                         }) {
                             best = Some((i, p));

@@ -825,6 +825,7 @@ impl Fleet {
     }
 
     /// A bus that is parked, fit to drive and not assigned to any line yet.
+    #[cfg(test)]
     pub fn unassigned_operational(&self) -> Option<u32> {
         self.buses
             .iter()
@@ -834,16 +835,33 @@ impl Fleet {
             .map(|b| b.id)
     }
 
+    /// Buses of `line` that are waiting in the depot and fit to drive.
+    pub fn ready_list(&self, line: usize) -> impl Iterator<Item = &FleetBus> {
+        self.buses.iter().filter(move |b| {
+            b.assigned == Some(line)
+                && b.line.is_none()
+                && b.depart.is_none()
+                && (b.bay.is_some() || b.home > 0)
+                && !b.needs_service()
+        })
+    }
+
     /// A bus of `line` that is waiting in the depot and fit to drive.
+    #[cfg(test)]
     pub fn ready_for(&self, line: usize) -> Option<u32> {
+        self.ready_list(line).next().map(|b| b.id)
+    }
+
+    /// First free, roadworthy bus that `ok` accepts.
+    pub fn unassigned_where(&self, ok: impl Fn(&FleetBus) -> bool) -> Option<u32> {
         self.buses
             .iter()
             .find(|b| {
-                b.assigned == Some(line)
-                    && b.line.is_none()
+                b.line.is_none()
+                    && b.assigned.is_none()
                     && b.depart.is_none()
-                    && (b.bay.is_some() || b.home > 0)
                     && !b.needs_service()
+                    && ok(b)
             })
             .map(|b| b.id)
     }
@@ -876,6 +894,26 @@ impl Fleet {
             b.arriving = b.bay.is_some();
         }
         self.version += 1;
+    }
+}
+
+#[cfg(test)]
+pub fn test_bus(id: u32) -> FleetBus {
+    FleetBus {
+        id,
+        paint: None,
+        plate: String::new(),
+        spec: 0,
+        fuel: 100.0,
+        condition: 100.0,
+        clean: 100.0,
+        line: None,
+        bay: None,
+        home: 0,
+        assigned: None,
+        depart: None,
+        upgrades: 0,
+        arriving: false,
     }
 }
 

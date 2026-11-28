@@ -266,15 +266,6 @@ impl Staff {
     }
 
     /// A free driver whose shift covers `minute_of_day`.
-    pub fn free_on_shift(&self, minute_of_day: u32) -> Option<u32> {
-        self.drivers
-            .iter()
-            .filter(|d| d.bus.is_none() && d.shift.contains(minute_of_day))
-            // Best drivers first so skill matters.
-            .max_by_key(|d| d.skill)
-            .map(|d| d.id)
-    }
-
     pub fn daily_wages(&self) -> f64 {
         self.drivers.iter().map(|d| d.wage).sum()
     }

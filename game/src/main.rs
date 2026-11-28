@@ -1,3 +1,15 @@
+// Bevy systems take many parameters and complex query types; the rest are style lints we accept.
+#![allow(
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::needless_late_init,
+    clippy::enum_variant_names,
+    clippy::unnecessary_sort_by,
+    clippy::needless_range_loop,
+    clippy::field_reassign_with_default,
+    clippy::wrong_self_convention,
+    clippy::if_same_then_else
+)]
 mod bus_menu;
 mod busicon;
 mod busmodel;
@@ -21,6 +33,7 @@ mod presence;
 mod render;
 mod research;
 mod reviews;
+mod roster;
 mod save;
 mod settings;
 mod sidebar;
@@ -310,6 +323,7 @@ fn main() {
     .init_resource::<modes::Conditions>()
     .init_resource::<reviews::Reviews>()
     .init_resource::<contracts::Contracts>()
+    .init_resource::<roster::Roster>()
     .init_resource::<ledsign::SignCache>()
     .init_resource::<depot::Arrivals>()
     .init_resource::<depot::Lags>()
@@ -450,7 +464,13 @@ fn main() {
     )
     .add_systems(
         Update,
-        (contracts::contract_tick, contracts::contract_actions).run_if(in_state(AppState::Playing)),
+        (
+            contracts::contract_tick,
+            contracts::contract_actions,
+            roster::roster_actions,
+            roster::roster_ui,
+        )
+            .run_if(in_state(AppState::Playing)),
     )
     .add_systems(OnExit(AppState::Menu), depot::menu_backdrop_exit)
     .add_systems(
@@ -580,6 +600,7 @@ fn init_game(
     commands.insert_resource(modes::Conditions::default());
     commands.insert_resource(reviews::Reviews::default());
     commands.insert_resource(contracts::Contracts::default());
+    commands.insert_resource(roster::Roster::default());
     commands.insert_resource(extdepot::ExtDepots::default());
     commands.insert_resource(Draft::default());
     commands.insert_resource(Tool::Idle);
@@ -829,8 +850,18 @@ pub fn wear_multiplier() -> f32 {
 }
 
 /// Assigns the first free, roadworthy bus to a line. It leaves the depot for the line's departures.
-fn assign_bus(fleet: &mut Fleet, line_idx: usize) -> bool {
-    let Some(id) = fleet.unassigned_operational() else {
+fn assign_bus(
+    fleet: &mut Fleet,
+    roster: &roster::Roster,
+    catalog: &fleet::Catalog,
+    line_idx: usize,
+) -> bool {
+    let Some(id) = fleet.unassigned_where(|b| {
+        catalog
+            .0
+            .get(b.spec)
+            .is_none_or(|s| roster::bus_fits_line(roster, s.category, line_idx))
+    }) else {
         return false;
     };
     if let Some(b) = fleet.get_mut(id) {
@@ -854,6 +885,7 @@ fn game_actions(
     mut fleet: ResMut<Fleet>,
     mut eco: ResMut<Economy>,
     mut buses: Query<&mut Bus>,
+    (roster, catalog): (Res<roster::Roster>, Res<fleet::Catalog>),
 ) {
     for UiAction(action) in events.read() {
         match *action {
@@ -910,7 +942,7 @@ fn game_actions(
                         // Start the line with up to two buses from the depot.
                         let mut sent = 0;
                         for _ in 0..2 {
-                            if assign_bus(&mut fleet, idx) {
+                            if assign_bus(&mut fleet, &roster, &catalog, idx) {
                                 sent += 1;
                             }
                         }
@@ -937,7 +969,7 @@ fn game_actions(
                 }
             }
             Action::AddBus(i) => {
-                if i < lines.0.len() && assign_bus(&mut fleet, i) {
+                if i < lines.0.len() && assign_bus(&mut fleet, &roster, &catalog, i) {
                     eco.say(&real, format!("Bus assigned to {}", lines.0[i].name));
                 } else {
                     eco.say(

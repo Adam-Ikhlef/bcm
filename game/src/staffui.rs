@@ -120,10 +120,11 @@ pub fn staff_actions(
             Action::StaffPage(d) => {
                 sv.page = (sv.page as i32 + d).max(0) as usize;
             }
-            Action::Hire(id) => match staff.hire(id) {
-                Some(name) => eco.say(&real, format!("{name} hired · paid daily at midnight")),
-                None => {}
-            },
+            Action::Hire(id) => {
+                if let Some(name) = staff.hire(id) {
+                    eco.say(&real, format!("{name} hired · paid daily at midnight"))
+                }
+            }
             Action::Fire(id) => match staff.fire(id) {
                 Ok(name) => eco.say(&real, format!("{name} left the company")),
                 Err(why) => eco.say(&real, why),

@@ -26,7 +26,7 @@ Targets Windows, macOS and Ubuntu.
 
 ## For players: the installer
 
-Download `BusManager-Setup-<your system>` from the latest GitHub Release and run it.
+Download `BusManager-Setup-<os>-<arch>` from the latest GitHub Release and run it. Supported: Windows x64 and ARM64, macOS Apple silicon (`arm64`) and Intel (`x64`), Linux x64 and ARM64.
 It can **install**, **update**, **repair** and **uninstall** the game, and creates a Start menu /
 applications-menu shortcut.
 
@@ -60,9 +60,22 @@ Bus Manager is free. If you enjoy it you can support development on [Ko-fi](http
 
 1. Bump `version` in the root `Cargo.toml` (`[workspace.package]`).
 2. `git tag v0.2.0 && git push --tags`
-3. The workflow builds Windows, macOS and Ubuntu and attaches:
-   `busmanager-<os>.zip|tar.gz` (what the installer downloads), `BusManager-Setup-<os>`
-   (Windows: Inno Setup wizard) and `BusManager-macos-app.zip` (a ready `BusManager.app` with the icon).
+3. The workflow builds Windows (x64, ARM64), macOS (Apple silicon, Intel) and Linux (x64, ARM64) and attaches:
+   `busmanager-<os>-<arch>.zip|tar.gz` (what the installer and the in-game updater download),
+   `BusManager-Setup-<os>-<arch>` (Windows: Inno Setup wizard) and `BusManager-macos-<arch>-app.zip`
+   (a ready `BusManager.app` with the icon).
+
+### Workflows
+
+| Workflow | When | What |
+|---|---|---|
+| CI | push, PR | tests on Linux x64/ARM64, Windows, macOS; formatting |
+| PR checks | PR | project rules (English, filled description, no binaries), fmt, clippy, tests |
+| PR test builds | PR | builds all six systems; download the artifacts from the run (7 days) |
+| Close invalid PRs | PR opened | closes PRs from outside the team that are empty, not in English, off `main`, or touch `.github/` |
+| Build | push to `main`, tags | all six systems; a `v*` tag publishes the release |
+| Security | push, PR, weekly | `cargo audit`, dependency review (CodeQL runs from GitHub's default setup) |
+| Issue language | issue | closes issues not written in English |
 
 How to put the website online: see [WEBSITE.md](WEBSITE.md).
 
@@ -221,5 +234,7 @@ A new company starts with **no stands and no buses**. Use the toolbar at the bot
 - [ ] Ticket inspectors (appear in buses on the map)
 - [x] Bigger 3D depot (4x lot, 26x20 cells): buses leave along roads to the edge of the scene and come back in, reversing into their bay; buses wait behind each other. Existing stands keep their place (lot expansion now 18 / 22 / 26 columns)
 - [x] Working destination displays on 3D depot buses (LED dot-matrix: line number + last stop, "NO SERVICE" when unassigned)
-- [ ] Timetable menu (shifts per depot and bus, driver per bus, bus groups per line)
+- [x] Timetable menu (calendar button in the bottom bar): shifts per depot, shifts and a fixed driver per bus, bus group per line (default All); dispatch follows it
+- [x] Security: zip 9.x (fixes all 9 Dependabot alerts), workflow permissions, six-platform builds, PR workflows
+- [x] Tile and city downloads try five Overpass servers, three rounds with pauses, and the error lists what every server answered
 - [x] Contracts (Finance menu): suppliers for fuel, electricity, parts, Wi-Fi, ticket inspectors; advertisers come to us; negotiation via the researchers ($300, 2 days)

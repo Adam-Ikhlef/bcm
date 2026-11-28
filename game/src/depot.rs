@@ -689,7 +689,7 @@ pub fn spawn_depot_scene(
         for f in 0..*floors {
             for c in 0..cols {
                 let wx = bx + (c as f32 - (cols as f32 - 1.0) / 2.0) * 3.0;
-                let lit = (i as u32 * 7 + f * 3 + c as u32 * 5) % 6 == 0;
+                let lit = (i as u32 * 7 + f * 3 + c as u32 * 5).is_multiple_of(6);
                 let m = if lit { &win_lit } else { &win };
                 place(
                     &cube,
@@ -1593,7 +1593,7 @@ pub fn rebuild_panel(
                 ));
             }
             None => {
-                if *panel != DepotPanel::Build && fleet.buses.len() > 0 {
+                if *panel != DepotPanel::Build && !fleet.buses.is_empty() {
                     p.spawn(text(
                         f,
                         false,
